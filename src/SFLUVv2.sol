@@ -1,9 +1,9 @@
 pragma solidity ^0.8.26;
 
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
 import { ISFLUVErrors } from "./ISFLUVErrors.sol";
-import "../lib/openzeppelin-contracts-upgradeable/contracts/access/AccessControlUpgradeable.sol";
-import "../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
-import {UUPSUpgradeable} from "../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 contract SFLUVv2 is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, ISFLUVErrors {
 
@@ -26,8 +26,15 @@ contract SFLUVv2 is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUPSUpgra
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) { }
 
+    // we'll define admin roles for MINTER and REDEEMER - but not use them for now
+    // this method will allow us to delegate those roles later if desired, e.g. to a dao
+    function setAdminRole(bytes32 role, bytes32 adminRole) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _setRoleAdmin(role, adminRole);
+    }
+
     // this role allows the holder to mint (wrap) underlying token (HONEY) into SFLUV
     bytes32 public constant MINTER_ROLE = keccak256("MINTER");
+    bytes32 public constant MINTER_ADMIN_ROLE = keccak256("MINTER_ADMIN");
 
     function depositFor(address account, uint256 amount) public override returns (bool) {
         require(hasRole(MINTER_ROLE, _msgSender()));
@@ -36,6 +43,7 @@ contract SFLUVv2 is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUPSUpgra
 
     // this role allows the holder to redeem (unwrap) SFLUV to the underlying token (HONEY)
     bytes32 public constant REDEEMER_ROLE = keccak256("REDEEMER");
+    bytes32 public constant REDEEMER_ADMIN_ROLE = keccak256("REDEEMER_ADMIN");
 
     function withdrawTo(address account, uint256 amount) public override returns (bool) {
         require(hasRole(REDEEMER_ROLE, _msgSender()));
