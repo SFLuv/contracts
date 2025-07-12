@@ -7,6 +7,14 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 
 contract SFLUVv2 is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, ISFLUVErrors {
 
+    // this role allows the holder to mint (wrap) underlying token (HONEY) into SFLUV
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER");
+    bytes32 public constant MINTER_ADMIN_ROLE = keccak256("MINTER_ADMIN");
+
+    // this role allows the holder to redeem (unwrap) SFLUV to the underlying token (HONEY)
+    bytes32 public constant REDEEMER_ROLE = keccak256("REDEEMER");
+    bytes32 public constant REDEEMER_ADMIN_ROLE = keccak256("REDEEMER_ADMIN");
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -22,31 +30,19 @@ contract SFLUVv2 is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUPSUpgra
         // Check for zero addresses.
         if (_governance == address(0)) revert ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, _governance);
+
+        _setRoleAdmin(MINTER_ROLE, MINTER_ADMIN_ROLE);
+        _setRoleAdmin(REDEEMER_ROLE, REDEEMER_ADMIN_ROLE);
+
     }
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) { }
 
-    // we'll define admin roles for MINTER and REDEEMER - but not use them for now
-    // this method will allow us to delegate those roles later if desired, e.g. to a dao
-    function setAdminRole(bytes32 role, bytes32 adminRole) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _setRoleAdmin(role, adminRole);
+    function depositFor(address account, uint256 amount) public override onlyRole(MINTER_ROLE) returns (bool) {
+        return super.depositFor(account, amount);
     }
 
-    // this role allows the holder to mint (wrap) underlying token (HONEY) into SFLUV
-    bytes32 public constant MINTER_ROLE = keccak256("MINTER");
-    bytes32 public constant MINTER_ADMIN_ROLE = keccak256("MINTER_ADMIN");
-
-    function depositFor(address account, uint256 amount) public override returns (bool) {
-        require(hasRole(MINTER_ROLE, _msgSender()));
-        return ERC20WrapperUpgradeable.depositFor(account, amount);
-    }
-
-    // this role allows the holder to redeem (unwrap) SFLUV to the underlying token (HONEY)
-    bytes32 public constant REDEEMER_ROLE = keccak256("REDEEMER");
-    bytes32 public constant REDEEMER_ADMIN_ROLE = keccak256("REDEEMER_ADMIN");
-
-    function withdrawTo(address account, uint256 amount) public override returns (bool) {
-        require(hasRole(REDEEMER_ROLE, _msgSender()));
-        return ERC20WrapperUpgradeable.withdrawTo(account, amount);
+    function withdrawTo(address account, uint256 amount) public override onlyRole(REDEEMER_ROLE) returns (bool) {
+        return super.withdrawTo(account, amount);
     }
 }

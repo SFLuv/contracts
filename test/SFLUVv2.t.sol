@@ -46,12 +46,12 @@ contract SFLUVv2Test is Test {
         // gov has the default admin role
         assert(testLUVCoin.hasRole(testLUVCoin.DEFAULT_ADMIN_ROLE(), gov));
 
-        // the default admin role is also the minter admin role
-        assert(testLUVCoin.getRoleAdmin(testLUVCoin.MINTER_ROLE()) == testLUVCoin.DEFAULT_ADMIN_ROLE());
-
-        // got pranked by this :/
+        // give admin role to gov
         vm.startPrank(gov);
+        testLUVCoin.grantRole(testLUVCoin.MINTER_ADMIN_ROLE(), gov);
         testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), gov);
+        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), gov);
+        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), gov);
         vm.stopPrank();
 
         // mint sfluv to payer
@@ -76,13 +76,6 @@ contract SFLUVv2Test is Test {
     }
 
     function testAdminRoles() public {
-
-        assert(testLUVCoin.getRoleAdmin(testLUVCoin.MINTER_ROLE()) == testLUVCoin.DEFAULT_ADMIN_ROLE());
-
-        // set the admin role for minting
-        vm.startPrank(gov);
-        testLUVCoin.setAdminRole(testLUVCoin.MINTER_ROLE(), testLUVCoin.MINTER_ADMIN_ROLE());
-        vm.stopPrank();
 
         assert(testLUVCoin.getRoleAdmin(testLUVCoin.MINTER_ROLE()) == testLUVCoin.MINTER_ADMIN_ROLE());
 
