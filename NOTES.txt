@@ -6,9 +6,21 @@ forge script script/DeployMockCoin.s.sol:DeployMockCoin --rpc-url http://127.0.0
 
 forge script script/DeploySFLUVv2.s.sol:DeploySFLUVv2 --rpc-url http://127.0.0.1:8545 --private-key $PRIVATE_KEY --broadcast
 
-# test proxy: 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9
+# deploy bepolia
+forge script script/DeploySFLUVv2.s.sol:DeploySFLUVv2 --rpc-url https://bepolia.rpc.berachain.com --private-key $PRIVATE_KEY --broadcast
+# 0x743eA802Cf754d817EE050dF2aE476634346fa21
 
+# deploy mainnet
+0x881cAd4f885c6701D8481c0eD347f6d35444eA7e
+
+# testnet
 forge script script/MintSFLUVv2.s.sol:MintSFLUVv2 --rpc-url http://127.0.0.1:8545 --private-key $PRIVATE_KEY --broadcast
+
+# grant mainnet
+forge script script/GrantSFLUVv2.s.sol:GrantSFLUVv2 --rpc-url https://rpc.berachain.com --private-key $PRIVATE_KEY --broadcast
+
+# mint mainnet
+forge script script/MintSFLUVv2.s.sol:MintSFLUVv2 --rpc-url https://rpc.berachain.com --private-key $PRIVATE_KEY --broadcast
 
 cast send --private-key $PRIVATE_KEY --rpc-url  http://127.0.0.1:8545 \
     0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0 "mint(address,uint256)" 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 1000ether
@@ -18,3 +30,14 @@ cast balance --erc20 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0 0xf39Fd6e51aad88
 
 # sfluv balance = anvil address 0
 cast balance --erc20 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 --rpc-url  http://127.0.0.1:8545
+
+forge verify-contract 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e src/SFLUVv2.sol:SFLUVv2 --verifier-url 'https://api.berascan.com/api' --etherscan-api-key WMP6HJHJ9NAK8A63SNAG1G4KHAUKU5X4SQ --num-of-optimizations 200
+
+forge verify-contract --watch --chain-id 80094 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e src/SFLUVv2.sol:SFLUVv2 --verifier-url 'https://api.berascan.com/api'
+
+forge verify-contract 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e  \
+src/SFLUVv2.sol:SFLUVv2 \
+--rpc-url https://rpc.berachain.com \
+--etherscan-api-key WMP6HJHJ9NAK8A63SNAG1G4KHAUKU5X4SQ \
+--verifier-url 'https://api.berascan.com/api' \
+--watch

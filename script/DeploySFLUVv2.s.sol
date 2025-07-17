@@ -7,8 +7,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract DeploySFLUVv2 is Script {
 
-    // TODO: change to correct address of base coin - e.g. HONEY
-    address constant private BASE_COIN_ADDR = 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
+    // HONEY on Berachain bepolia and mainnet
+    address constant private BASE_COIN_ADDR = 0xFCBD14DC51f0A4d49d5E53C2E0950e0bC26d0Dce;
 
     function run() public {
 

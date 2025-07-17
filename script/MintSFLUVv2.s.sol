@@ -7,9 +7,12 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract MintSFLUVv2 is Script {
 
     uint public oneEther = 1 ether;
+    uint public oneGwei = 1 gwei;
 
-    address constant private SFLUV_V2_ADDR = 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9;
-    address constant private BASE_COIN_ADDR = 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
+    // mainnet
+    address constant private SFLUV_V2_ADDR = 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e;
+    // HONEY on Berachain main
+    address constant private BASE_COIN_ADDR = 0xFCBD14DC51f0A4d49d5E53C2E0950e0bC26d0Dce;
 
     function run() public {
 
@@ -18,12 +21,12 @@ contract MintSFLUVv2 is Script {
          IERC20 base = IERC20(BASE_COIN_ADDR);
          SFLUVv2 impl = SFLUVv2(SFLUV_V2_ADDR);
 
-        // assume that msg.sender is default admin
+        // assume that msg.sender has minter admin role
         if (!impl.hasRole(impl.MINTER_ROLE(), msg.sender)) {
             impl.grantRole(impl.MINTER_ROLE(), msg.sender);
         }
 
-        uint256 toMintAmt = 100 * oneEther;
+        uint256 toMintAmt = 5 * oneEther; // 5 HONEY
 
         assert(base.balanceOf(msg.sender) >= toMintAmt);
         base.approve(SFLUV_V2_ADDR, toMintAmt);
