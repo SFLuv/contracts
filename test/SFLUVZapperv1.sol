@@ -53,14 +53,12 @@ contract SFLUVZapperTest is Test {
         address lzbridge = address(0x1);
         address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
 
-
-
         SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
             lzbridge,
             honeyFactory,
             sfluv,
             byusd
-            );
+        );
 
         console.log(lzbridge, honeyFactory, sfluv, byusd);
         console.log(address(testSFLUVZapper));

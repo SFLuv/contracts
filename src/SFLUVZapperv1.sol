@@ -66,7 +66,10 @@ contract SFLUVZapperv1 is
     function initialize(
         address _governance,
         SFLUVZapperStorageInit calldata _storage
-    ) public {
+    )
+        initializer
+        public
+    {
         __AccessControl_init();
         __UUPSUpgradeable_init();
         __Storage_init(_storage);
