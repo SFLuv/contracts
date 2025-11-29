@@ -12,4 +12,10 @@
 	url = https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
 [submodule "lib/contracts"]
 	path = lib/contracts
+	url = https://github.com/selfxyz/self/contracts
+[submodule "lib/bera-contracts"]
+	path = lib/bera-contracts
 	url = https://github.com/berachain/contracts
+[submodule "lib/core"]
+	path = lib/core
+	url = https://github.com/hyperlane-xyz/core
