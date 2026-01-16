@@ -24,8 +24,6 @@ contract Migrator is
       }
   }
 
-  event Log(address);
-
   function migrate(address _bank, IERC20 _newUnderlying) public {
     uint256 amountOut = this.underlying().balanceOf(address(this));
     uint256 oldDecimals = 10 ** IERC20Metadata(address(this.underlying())).decimals();
@@ -42,9 +40,7 @@ contract Migrator is
     _mint(_bank, change);
 
     ERC20WrapperStorage storage $ = _getERCStorage();
-    emit Log(address($._underlying));
     $._underlying = _newUnderlying;
-    emit Log(address($._underlying));
   }
 
   function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) { }
