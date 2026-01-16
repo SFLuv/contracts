@@ -1,13 +1,15 @@
 pragma solidity ^0.8.26;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-
 import "@berachain/contracts/honey/IHoneyFactory.sol";
 import "@berachain/contracts/honey/Honey.sol";
+import { IOFT, SendParam, MessagingFee, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import { MessagingReceipt, MessagingFee } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
+import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 
 import "./ISFLUVZapperErrors.sol";
 import "./SFLUVv2.sol";
@@ -31,10 +33,10 @@ contract SFLUVZapperv1 is
     /* STORAGE */
 
     struct SFLUVZapperStorage {
-        address lzbridge;
+        IOFT lzbridge;
         IHoneyFactory honeyFactory;
         SFLUVv2 sfluv;
-        IERC20 byusd;
+        IERC20Metadata byusd;
     }
 
     // keccak256(abi.encode(uint256(keccak256("SFLUV.storage.SFLUVZapper")) - 1)) & ~bytes32(uint256(0xff))
@@ -83,7 +85,7 @@ contract SFLUVZapperv1 is
         SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
 
         if (s.lzbridge == address(0)) revert ZeroAddress();
-        $.lzbridge = s.lzbridge;
+        $.lzbridge = IOFT(s.lzbridge);
 
         if (s.honeyFactory == address(0)) revert ZeroAddress();
         $.honeyFactory = IHoneyFactory(s.honeyFactory);
@@ -92,7 +94,7 @@ contract SFLUVZapperv1 is
         $.sfluv = SFLUVv2(s.sfluv);
 
         if (s.byusd == address(0)) revert ZeroAddress();
-        $.byusd = IERC20(s.byusd);
+        $.byusd = IERC20Metadata(s.byusd);
     }
 
     function zapIn(uint256 amount) external onlySFLUVRole(MINTER_ROLE) {
@@ -112,7 +114,27 @@ contract SFLUVZapperv1 is
         _zapOutTo(amount, to);
     }
 
-    function zapOutAndLzBridgeTo(uint256 amount, address to) public onlySFLUVRole(REDEEMER_ROLE) {}
+    function zapOutAndLzBridgeTo(SendParam calldata lzParam) public onlySFLUVRole(REDEEMER_ROLE) {
+        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+
+        uint256 zapAmount = FixedPointMathLib.mulDiv(
+            lzParam.amountLD,
+            10 ** $.sfluv.decimals(),
+            10 ** $.byusd.decimals()
+        );
+
+        _zapOutTo(zapAmount, address(this));
+
+        MessagingFee memory fee = $.lzbridge.quoteSend(lzParam, false);
+        (
+            MessagingReceipt memory mReceipt,
+            OFTReceipt memory oReceipt
+        ) = $.lzbridge.send(
+            lzParam,
+            fee,
+            address(this)
+        );
+    }
 
     /* INTERNAL */
 
