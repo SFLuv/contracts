@@ -13,3 +13,6 @@
 [submodule "lib/contracts"]
 	path = lib/contracts
 	url = https://github.com/berachain/contracts
+[submodule "lib/devtools"]
+	path = lib/devtools
+	url = https://github.com/LayerZero-Labs/devtools
