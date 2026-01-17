@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IDeployErrors} from "./IDeployErrors.sol";
 
-contract DeploySFLUVv2 is Script, IDeployErrors {
+contract DeploySFLUVZapper is Script, IDeployErrors {
 
     function run() public {
         address lzbridge = vm.envAddress("LZ_BRIDGE_ADDRESS");

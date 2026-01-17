@@ -26,7 +26,7 @@ contract MintSFLUVv2 is Script {
             impl.grantRole(impl.MINTER_ROLE(), msg.sender);
         }
 
-        uint256 toMintAmt = 5 * oneEther; // 5 HONEY
+        uint256 toMintAmt = 1 * oneEther; // 5 HONEY
 
         assert(base.balanceOf(msg.sender) >= toMintAmt);
         base.approve(SFLUV_V2_ADDR, toMintAmt);

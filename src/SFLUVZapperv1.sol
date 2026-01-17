@@ -5,7 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-
+import "forge-std/console.sol";
 import "@berachain/contracts/honey/IHoneyFactory.sol";
 import "@berachain/contracts/honey/Honey.sol";
 
@@ -93,6 +93,9 @@ contract SFLUVZapperv1 is
 
         if (s.byusd == address(0)) revert ZeroAddress();
         $.byusd = IERC20(s.byusd);
+
+        $.byusd.approve(s.honeyFactory, type(uint256).max);
+        $.honeyFactory.honey().approve(s.sfluv, type(uint256).max);
     }
 
     function zapIn(uint256 amount) external onlySFLUVRole(MINTER_ROLE) {
