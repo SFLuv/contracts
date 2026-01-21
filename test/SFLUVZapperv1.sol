@@ -11,21 +11,17 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import { Upgrades } from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import "@berachain/contracts/honey/IHoneyFactory.sol";
+import { IBYUSD } from "../src/SFLUVZapperv1.sol";
+import { IOFT, SendParam, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import { MessagingReceipt, MessagingFee } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 
 
-interface BYUSD {
-    function balanceOf(address account) external view returns (uint256);
-    function symbol() external view returns (string memory);
-    function decimals() external view returns (uint8);
-    function approve(address spender, uint256 amount) external returns (bool);
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-}
+
 
 contract SFLUVZapperTest is Test {
     SFLUVv2 public testLUVCoin;
     SFLUVZapperv1 public testSFLUVZapper;
-    BYUSD public testBYUSD;
+    IBYUSD public testBYUSD;
 
     address internal peon;
     address defaultAdmin = address(0x90496e23825aD0C8107d04671e6a27f30630Fc35);
@@ -46,20 +42,23 @@ contract SFLUVZapperTest is Test {
         vm.createSelectFork(forkURL, forkBlock);
         address sfluv = vm.envAddress('SFLUV_ADDRESS');
         address byusd = vm.envAddress("BYUSD_ADDRESS");
+        address honey = vm.envAddress("HONEY_ADDRESS");
+        address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
+        address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
         testLUVCoin = SFLUVv2(sfluv);
-        testBYUSD = BYUSD(byusd);
+        testBYUSD = IBYUSD(byusd);
         testSFLUVZapper = new SFLUVZapperv1();
 
         peon = makeAddr("peon");
-
-        address lzbridge = address(0x1);
         address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
 
         SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
-            lzbridge,
             honeyFactory,
             sfluv,
-            byusd
+            byusd,
+            honey,
+            honeyToBYUSDPool,
+            byusdVault
         );
 
         zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
@@ -160,4 +159,69 @@ contract SFLUVZapperTest is Test {
         vm.stopPrank();
     }
 
+    function testUnwrapSwapAndBridge() public {
+    // ----------------------------
+    // Setup decimal helpers
+    // ----------------------------
+    uint256 byusdExp = 10**testBYUSD.decimals();
+    uint256 sfluvExp = 10**testLUVCoin.decimals();
+
+    // Send some BYUSD to defaultAdmin from whale
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
+
+    // Approve zapper
+    vm.startPrank(defaultAdmin);
+    testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+
+    // Wrap 100 BYUSD into SFLUV first
+    testSFLUVZapper.zapIn(100 * byusdExp);
+
+    uint256 startingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
+    console.log("Starting SFLUV balance:", startingLUVBalance);
+
+    // ----------------------------
+    // Construct SendParam
+    // ----------------------------
+    SendParam memory lzParam = SendParam({
+    dstEid: 30101,
+    to: bytes32(uint256(uint160(address(defaultAdmin)))), // spoofed ETH address
+    amountLD: 50 * byusdExp,
+    minAmountLD: 0,
+    extraOptions: "",
+    composeMsg: "",
+    oftCmd: ""
+});
+
+    // ----------------------------
+    // Call unwrap/swap/bridge
+    // ----------------------------
+    (MessagingReceipt memory mReceipt, OFTReceipt memory oReceipt) =
+        testSFLUVZapper.unwrapSwapAndBridge(lzParam);
+
+    // ----------------------------
+    // Logging receipts for inspection
+    // ----------------------------
+    console.log("MessagingReceipt:");
+    console.log(" dstEid:", mReceipt.dstEid);
+    console.log(" srcEid:", mReceipt.srcEid);
+    console.log(" nonce:", mReceipt.nonce);
+    console.log(" success:", mReceipt.success ? 1 : 0);
+
+    console.log("OFTReceipt:");
+    console.log(" amount:", oReceipt.amount);
+    console.log(" fee:", oReceipt.fee);
+    console.log(" success:", oReceipt.success ? 1 : 0);
+
+    // ----------------------------
+    // Verify SFLUV balance decreased
+    // ----------------------------
+    uint256 endingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
+    console.log("Ending SFLUV balance:", endingLUVBalance);
+    assert(endingLUVBalance < startingLUVBalance);
+
+    vm.stopPrank();
 }
+
+
+    }

@@ -7,18 +7,23 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@berachain/contracts/honey/IHoneyFactory.sol";
 import "@berachain/contracts/honey/Honey.sol";
-import { IOFT, SendParam, MessagingFee, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import { IOFT, SendParam, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import { MessagingReceipt, MessagingFee } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
+import { ILiquidityPool} from "./ILiquidityPool.sol";
 
 import "./ISFLUVZapperErrors.sol";
 import "./SFLUVv2.sol";
 
+interface IBYUSD is IERC20Metadata, IOFT {}
+
 struct SFLUVZapperStorageInit {
-  address lzbridge;
   address honeyFactory;
   address sfluv;
   address byusd;
+  address honey;
+  address honeyToBYUSDPool;
+  address byusdVault;
 }
 
 contract SFLUVZapperv1 is
@@ -33,10 +38,15 @@ contract SFLUVZapperv1 is
     /* STORAGE */
 
     struct SFLUVZapperStorage {
-        IOFT lzbridge;
         IHoneyFactory honeyFactory;
         SFLUVv2 sfluv;
-        IERC20Metadata byusd;
+
+        IBYUSD byusd;
+        IERC20Metadata honey;
+
+        ILiquidityPool honeyToBYUSDPool;
+
+        address byusdVault;
     }
 
     // keccak256(abi.encode(uint256(keccak256("SFLUV.storage.SFLUVZapper")) - 1)) & ~bytes32(uint256(0xff))
@@ -84,9 +94,6 @@ contract SFLUVZapperv1 is
     ) internal onlyInitializing {
         SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
 
-        if (s.lzbridge == address(0)) revert ZeroAddress();
-        $.lzbridge = IOFT(s.lzbridge);
-
         if (s.honeyFactory == address(0)) revert ZeroAddress();
         $.honeyFactory = IHoneyFactory(s.honeyFactory);
 
@@ -94,7 +101,19 @@ contract SFLUVZapperv1 is
         $.sfluv = SFLUVv2(s.sfluv);
 
         if (s.byusd == address(0)) revert ZeroAddress();
-        $.byusd = IERC20Metadata(s.byusd);
+        $.byusd = IBYUSD(s.byusd);
+
+        if (s.honey == address(0)) revert ZeroAddress();
+        $.honey = IERC20Metadata(s.honey);
+
+        if (s.honeyToBYUSDPool == address(0)) revert ZeroAddress();
+        $.honeyToBYUSDPool = ILiquidityPool(s.honeyToBYUSDPool);
+
+        if (s.byusdVault == address(0)) revert ZeroAddress();
+        $.byusdVault = s.byusdVault;
+
+        $.byusd.approve(s.honeyFactory, type(uint256).max);
+        $.honeyFactory.honey().approve(s.sfluv, type(uint256).max);
     }
 
     function zapIn(uint256 amount) external onlySFLUVRole(MINTER_ROLE) {
@@ -125,15 +144,44 @@ contract SFLUVZapperv1 is
 
         _zapOutTo(zapAmount, address(this));
 
-        MessagingFee memory fee = $.lzbridge.quoteSend(lzParam, false);
+        MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);
         (
             MessagingReceipt memory mReceipt,
             OFTReceipt memory oReceipt
-        ) = $.lzbridge.send(
+        ) = $.byusd.send(
             lzParam,
             fee,
             address(this)
         );
+    }
+
+    function unwrapSwapAndBridge(SendParam calldata lzParam) public onlySFLUVRole(REDEEMER_ROLE) returns (MessagingReceipt memory, OFTReceipt memory) {
+        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+
+        uint256 zapAmount = FixedPointMathLib.mulDiv(
+            lzParam.amountLD,
+            10 ** $.sfluv.decimals(),
+            10 ** $.byusd.decimals()
+        );
+
+       return(_unwrapSwapAndBridge(zapAmount, lzParam));
+    }
+
+    function uniswapV3SwapCallback(
+    int256 amount0Delta,
+    int256 amount1Delta,
+    bytes calldata
+    ) external {
+        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+
+        require(msg.sender == address($.honeyToBYUSDPool), "unauthorized pool");
+
+        if (amount0Delta > 0) {
+            IERC20Metadata($.honeyToBYUSDPool.token0()).transfer(msg.sender, uint256(amount0Delta));
+        }
+        if (amount1Delta > 0) {
+            IERC20Metadata($.honeyToBYUSDPool.token1()).transfer(msg.sender, uint256(amount1Delta));
+        }
     }
 
     /* INTERNAL */
@@ -180,6 +228,78 @@ contract SFLUVZapperv1 is
             false
         );
     }
+
+    function _unwrapSwapAndBridge(uint256 amount, SendParam calldata lzParam) private
+    returns (MessagingReceipt memory, OFTReceipt memory)
+    {
+    SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+    // 1. Pull SFLUV
+    bool success = $.sfluv.transferFrom(_msgSender(), address(this), amount);
+    if (!success) revert TransferFailed(address($.sfluv), address(this), _msgSender(), amount);
+
+    // 2. Unwrap to HONEY
+    success = $.sfluv.withdrawTo(address(this), amount);
+    if (!success) revert RedeemFailed();
+
+    uint256 honeyBalance = $.honey.balanceOf(address(this));
+
+    //2.5 tracking BYUSD before redeem/swap process just in case not enough is gotten
+    uint256 byusdBefore = $.byusd.balanceOf(address(this));
+
+    // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
+    uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault);
+
+    if (byusdAvailable > 0) {
+        uint256 byusdAvailableInHoney = byusdAvailable * 1e12; // 6 → 18
+        uint256 redeemAmount = honeyBalance < byusdAvailableInHoney
+            ? honeyBalance
+            : byusdAvailableInHoney;
+
+
+        $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
+        honeyBalance -= redeemAmount;
+    }
+
+    // 4. Swap remaining HONEY via pool if needed
+    if (honeyBalance > 0) {
+        (uint160 sqrtPriceX96,,,,,,) = $.honeyToBYUSDPool.slot0();
+
+        // 95% minimum output
+        // sqrt(1 / 0.95) ≈ 1.025978352
+        uint256 NUM = 1_025_978_352; // scaled by 1e9
+        uint256 DEN = 1_000_000_000;
+
+        uint160 sqrtPriceLimitX96 = uint160(
+            (uint256(sqrtPriceX96) * NUM) / DEN
+        );
+
+        $.honeyToBYUSDPool.swap(
+            address(this),
+            false,
+            int256(honeyBalance),
+            sqrtPriceLimitX96,
+            ""
+        );
+    }
+
+    uint256 byusdAfter = $.byusd.balanceOf(address(this));
+    uint256 byusdAccumulated = byusdAfter - byusdBefore;
+    require(byusdAccumulated >= (amount * 1e6 * 95 / 100), "insufficient BYUSD from swap/redemption");
+
+    // 5. Bridge final BYUSD balance
+    MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);
+    require(
+    $.byusd.balanceOf(address(this)) >= lzParam.amountLD,
+    "insufficient BYUSD after swap"
+    );
+
+    (
+            MessagingReceipt memory mReceipt,
+            OFTReceipt memory oReceipt
+        ) = $.byusd.send(lzParam, fee, address(this));
+    return (mReceipt, oReceipt);
+}
+
 
     function _authorizeUpgrade(
         address newImplementation

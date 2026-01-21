@@ -10,17 +10,21 @@ import {IDeployErrors} from "./IDeployErrors.sol";
 contract DeploySFLUVv2 is Script, IDeployErrors {
 
     function run() public {
-        address lzbridge = vm.envAddress("LZ_BRIDGE_ADDRESS");
         address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
         address sfluv = vm.envAddress("SFLUV_ADDRESS");
         address byusd = vm.envAddress("BYUSD_ADDRESS");
+        address honey = vm.envAddress("HONEY_ADDRESS");
+        address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
+        address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
 
 
         SFLUVZapperStorageInit memory s = SFLUVZapperStorageInit(
-          lzbridge,
-          honeyFactory,
-          sfluv,
-          byusd
+            honeyFactory,
+            sfluv,
+            byusd,
+            honey,
+            honeyToBYUSDPool,
+            byusdVault
         );
 
         vm.startBroadcast();
