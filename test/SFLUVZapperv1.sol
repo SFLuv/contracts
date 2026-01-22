@@ -14,16 +14,30 @@ import "@berachain/contracts/honey/IHoneyFactory.sol";
 import { IBYUSD } from "../src/SFLUVZapperv1.sol";
 import { IOFT, SendParam, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import { MessagingReceipt, MessagingFee } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
+import "forge-std/console.sol";
 
 
+interface IWBERA {
+    // ERC20 standard functions you might need
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address to, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
 
+    // unwrap WBERA to native BERA
+    function withdraw(uint256 amount) external;
+
+    // optional: wrap BERA into WBERA
+    function deposit() external payable;
+}
 
 contract SFLUVZapperTest is Test {
     SFLUVv2 public testLUVCoin;
     SFLUVZapperv1 public testSFLUVZapper;
     IBYUSD public testBYUSD;
+    IWBERA public wbera;
 
     address internal peon;
+    address vitEth = address(0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045);
     address defaultAdmin = address(0x90496e23825aD0C8107d04671e6a27f30630Fc35);
 
     uint public oneEther = 1 ether; // TODO: elsewhere?
@@ -45,6 +59,8 @@ contract SFLUVZapperTest is Test {
         address honey = vm.envAddress("HONEY_ADDRESS");
         address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
         address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
+        address wrappedNative = vm.envAddress("WRAPPED_NATIVE_ADDRESS");
+        wbera = IWBERA(wrappedNative);
         testLUVCoin = SFLUVv2(sfluv);
         testBYUSD = IBYUSD(byusd);
         testSFLUVZapper = new SFLUVZapperv1();
@@ -170,9 +186,20 @@ contract SFLUVZapperTest is Test {
     vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
     testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
 
+    // Send some BYUSD to SFLuvZapper from whale
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(address(testSFLUVZapper), 100 * byusdExp);
+
+    vm.deal(address(testSFLUVZapper), 100 * sfluvExp);
+    console.log("SFLUVZapper BERA balance:", address(testSFLUVZapper).balance);
+    vm.deal(address(testBYUSD), 100 * sfluvExp);
+    console.log("BYUSD BERA balance:", address(testBYUSD).balance);
+
+    console.log("approving zapper");
     // Approve zapper
     vm.startPrank(defaultAdmin);
     testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+    testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
 
     // Wrap 100 BYUSD into SFLUV first
     testSFLUVZapper.zapIn(100 * byusdExp);
@@ -185,7 +212,7 @@ contract SFLUVZapperTest is Test {
     // ----------------------------
     SendParam memory lzParam = SendParam({
     dstEid: 30101,
-    to: bytes32(uint256(uint160(address(defaultAdmin)))), // spoofed ETH address
+    to: bytes32(uint256(uint160(vitEth))), // spoofed ETH address
     amountLD: 50 * byusdExp,
     minAmountLD: 0,
     extraOptions: "",
@@ -203,15 +230,16 @@ contract SFLUVZapperTest is Test {
     // Logging receipts for inspection
     // ----------------------------
     console.log("MessagingReceipt:");
-    console.log(" dstEid:", mReceipt.dstEid);
-    console.log(" srcEid:", mReceipt.srcEid);
+    console.logBytes32(mReceipt.guid);
     console.log(" nonce:", mReceipt.nonce);
-    console.log(" success:", mReceipt.success ? 1 : 0);
+    console.log(" messaging fee - nativeFee:", mReceipt.fee.nativeFee);
+    console.log(" messaging fee - lzTokenFee:", mReceipt.fee.lzTokenFee);
+
+
 
     console.log("OFTReceipt:");
-    console.log(" amount:", oReceipt.amount);
-    console.log(" fee:", oReceipt.fee);
-    console.log(" success:", oReceipt.success ? 1 : 0);
+    console.log(" amountSent:", oReceipt.amountSentLD);
+    console.log(" amountRecieved:", oReceipt.amountReceivedLD);
 
     // ----------------------------
     // Verify SFLUV balance decreased

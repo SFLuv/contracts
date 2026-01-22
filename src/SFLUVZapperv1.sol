@@ -11,7 +11,7 @@ import { IOFT, SendParam, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/in
 import { MessagingReceipt, MessagingFee } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 import { ILiquidityPool} from "./ILiquidityPool.sol";
-
+import "forge-std/console.sol";
 import "./ISFLUVZapperErrors.sol";
 import "./SFLUVv2.sol";
 
@@ -113,6 +113,7 @@ contract SFLUVZapperv1 is
         $.byusdVault = s.byusdVault;
 
         $.byusd.approve(s.honeyFactory, type(uint256).max);
+        $.byusd.approve(s.byusd, type(uint256).max);
         $.honeyFactory.honey().approve(s.sfluv, type(uint256).max);
     }
 
@@ -232,19 +233,28 @@ contract SFLUVZapperv1 is
     function _unwrapSwapAndBridge(uint256 amount, SendParam calldata lzParam) private
     returns (MessagingReceipt memory, OFTReceipt memory)
     {
+    console.log("LZParam passed in:");
+    console.log(" dstEid:", lzParam.dstEid);
+    console.logBytes32(lzParam.to);
+    console.log(" amountLD:", lzParam.amountLD);
+    console.log(" minAmountLD:", lzParam.minAmountLD);
+    console.log("amount of SLFUV to unwrap:", amount);
+
     SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
     // 1. Pull SFLUV
     bool success = $.sfluv.transferFrom(_msgSender(), address(this), amount);
     if (!success) revert TransferFailed(address($.sfluv), address(this), _msgSender(), amount);
+    console.log("SFLUV transferred into Zapper contract:", amount);
 
     // 2. Unwrap to HONEY
     success = $.sfluv.withdrawTo(address(this), amount);
     if (!success) revert RedeemFailed();
-
     uint256 honeyBalance = $.honey.balanceOf(address(this));
+    console.log("HONEY balance after redeem:", honeyBalance);
 
     //2.5 tracking BYUSD before redeem/swap process just in case not enough is gotten
     uint256 byusdBefore = $.byusd.balanceOf(address(this));
+    console.log("BYUSD balance before redeem/swap:", byusdBefore);
 
     // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
     uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault);
@@ -258,6 +268,7 @@ contract SFLUVZapperv1 is
 
         $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
         honeyBalance -= redeemAmount;
+        console.log("Redeemed BYUSD from HONEY:", redeemAmount / 1e12);
     }
 
     // 4. Swap remaining HONEY via pool if needed
@@ -280,25 +291,42 @@ contract SFLUVZapperv1 is
             sqrtPriceLimitX96,
             ""
         );
+        console.log("Swapped remaining HONEY for BYUSD:", honeyBalance);
     }
 
     uint256 byusdAfter = $.byusd.balanceOf(address(this));
+    console.log("BYUSD balance after redeem/swap:", byusdAfter);
     uint256 byusdAccumulated = byusdAfter - byusdBefore;
-    require(byusdAccumulated >= (amount * 1e6 * 95 / 100), "insufficient BYUSD from swap/redemption");
+    console.log("amount we're comparing BYUSD accumulated against:", lzParam.amountLD * 95 / 100);
+    console.log("BYUSD accumulated from redeem/swap:", byusdAccumulated);
+    require(byusdAccumulated >= (lzParam.amountLD * 95 / 100), "insufficient BYUSD from swap/redemption");
 
     // 5. Bridge final BYUSD balance
     MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);
+    fee.nativeFee = fee.nativeFee * 10;
     require(
     $.byusd.balanceOf(address(this)) >= lzParam.amountLD,
     "insufficient BYUSD after swap"
     );
 
+    console.log("Zapper Bera balance before bridging:", address(this).balance);
+    console.log("Native fee for bridging:", fee.nativeFee);
+    console.log("LZ token fee for bridging:", fee.lzTokenFee);
+    console.log("Address of this contract:", address(this));
+    console.log("BYUSD's bera balance before bridging:", address($.byusd).balance);
+    console.log("zapper BYUSD balance before bridging:", $.byusd.balanceOf(address(this)));
+    console.logBytes32(lzParam.to);
     (
             MessagingReceipt memory mReceipt,
             OFTReceipt memory oReceipt
-        ) = $.byusd.send(lzParam, fee, address(this));
+        ) = $.byusd.send{ value: fee.nativeFee }(lzParam, fee, address(this));
+
+    console.log("zapper BYUSD balance after bridging:", $.byusd.balanceOf(address(this)));
+    console.log("Bridging BYUSD amountLD:", lzParam.amountLD);
     return (mReceipt, oReceipt);
 }
+
+
 
 
     function _authorizeUpgrade(
