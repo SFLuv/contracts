@@ -162,16 +162,9 @@ contract SFLUVZapperv1 is
         );
     }
 
-    function unwrapSwapAndBridge(SendParam calldata lzParam) public onlySFLUVRole(REDEEMER_ROLE) returns (MessagingReceipt memory, OFTReceipt memory) {
-        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
-
-        uint256 zapAmount = FixedPointMathLib.mulDiv(
-            lzParam.amountLD,
-            10 ** $.sfluv.decimals(),
-            10 ** $.byusd.decimals()
-        );
-
-       return(_unwrapSwapAndBridge(zapAmount, lzParam));
+    function unwrapSwapAndBridge(uint256 amount, address to) public onlySFLUVRole(REDEEMER_ROLE) returns (MessagingReceipt memory, OFTReceipt memory) {
+       //amount is 18 decimals, for SFLUV
+       return(_unwrapSwapAndBridge(amount, to));
     }
 
     function uniswapV3SwapCallback(
@@ -235,14 +228,16 @@ contract SFLUVZapperv1 is
         );
     }
 
-    function _unwrapSwapAndBridge(uint256 amount, SendParam calldata lzParam) private
+    function _unwrapSwapAndBridge(uint256 amount, address to) private
         returns (MessagingReceipt memory, OFTReceipt memory) {
-        console.log("LZParam passed in:");
-        console.log(" dstEid:", lzParam.dstEid);
-        console.logBytes32(lzParam.to);
-        console.log(" amountLD:", lzParam.amountLD);
-        console.log(" minAmountLD:", lzParam.minAmountLD);
-        console.log("amount of SFLUV to unwrap:", amount);
+        uint byusdAmount = FixedPointMathLib.mulDiv(
+            amount,
+            10 ** _getSFLUVZapperStorage().byusd.decimals(),
+            10 ** _getSFLUVZapperStorage().sfluv.decimals()
+        );
+        console.log(" amount passed in:", amount);
+        console.log(" BYUSD amount passed in:", byusdAmount);
+        console.log("address passed in:", to);
 
         SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
         // 1. Pull SFLUV
@@ -300,9 +295,20 @@ contract SFLUVZapperv1 is
         uint256 byusdAfter = $.byusd.balanceOf(address(this));
         console.log("BYUSD balance after redeem/swap:", byusdAfter);
         uint256 byusdAccumulated = byusdAfter - byusdBefore;
-        console.log("amount we're comparing BYUSD accumulated against:", lzParam.amountLD * 95 / 100);
+        console.log("amount we're comparing BYUSD accumulated against:", byusdAmount * 95 / 100);
         console.log("BYUSD accumulated from redeem/swap:", byusdAccumulated);
-        require(byusdAccumulated >= (lzParam.amountLD * 95 / 100), "insufficient BYUSD from swap/redemption");
+        require(byusdAccumulated >= (byusdAmount * 95 / 100), "insufficient BYUSD from swap/redemption");
+
+        // Prepare LZ send params
+        SendParam memory lzParam = SendParam({
+            dstEid: 30101, //ETH layerzero eid
+            to: bytes32(uint256(uint160(to))),
+            amountLD: byusdAmount,
+            minAmountLD: byusdAmount,
+            extraOptions: "",
+            composeMsg: "",
+            oftCmd: ""
+        });
 
         // 5. Bridge final BYUSD balance
         MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);

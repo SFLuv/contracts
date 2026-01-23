@@ -78,7 +78,7 @@ contract SFLUVZapperTest is Test {
         );
 
         zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
-        testSFLUVZapper = SFLUVZapperv1(address(zapperproxy));
+        testSFLUVZapper = SFLUVZapperv1(payable(zapperproxy));
         vm.startPrank(defaultAdmin);
         testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), defaultAdmin);
         testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), defaultAdmin);
@@ -208,23 +208,10 @@ contract SFLUVZapperTest is Test {
     console.log("Starting SFLUV balance:", startingLUVBalance);
 
     // ----------------------------
-    // Construct SendParam
-    // ----------------------------
-    SendParam memory lzParam = SendParam({
-    dstEid: 30101,
-    to: bytes32(uint256(uint160(vitEth))), // spoofed ETH address
-    amountLD: 50 * byusdExp,
-    minAmountLD: 0,
-    extraOptions: "",
-    composeMsg: "",
-    oftCmd: ""
-});
-
-    // ----------------------------
     // Call unwrap/swap/bridge
     // ----------------------------
     (MessagingReceipt memory mReceipt, OFTReceipt memory oReceipt) =
-        testSFLUVZapper.unwrapSwapAndBridge(lzParam);
+        testSFLUVZapper.unwrapSwapAndBridge(50 * sfluvExp, vitEth);
 
     // ----------------------------
     // Logging receipts for inspection
@@ -250,6 +237,5 @@ contract SFLUVZapperTest is Test {
 
     vm.stopPrank();
 }
-
 
     }
