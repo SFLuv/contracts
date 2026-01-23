@@ -15,7 +15,8 @@ contract GrantSFLUVv2 is Script {
     function run() public {
         vm.startBroadcast();
         SFLUVv2 impl = SFLUVv2(SFLUV_V2_ADDR);
-        impl.grantRole(impl.MINTER_ADMIN_ROLE(), TARGET_ADDR);
+        // impl.grantRole(impl.MINTER_ADMIN_ROLE(), TARGET_ADDR);
+        impl.grantRole(impl.REDEEMER_ADMIN_ROLE(), TARGET_ADDR);
         vm.stopBroadcast();
     }
 }

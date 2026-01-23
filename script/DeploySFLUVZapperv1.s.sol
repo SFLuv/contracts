@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IDeployErrors} from "./IDeployErrors.sol";
 
-contract DeploySFLUVv2 is Script, IDeployErrors {
+contract DeploySFLUVZapperv1 is Script, IDeployErrors {
 
     function run() public {
         address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
@@ -33,6 +33,11 @@ contract DeploySFLUVv2 is Script, IDeployErrors {
 
         bool isAdmin = token.hasRole(token.DEFAULT_ADMIN_ROLE(), msg.sender);
         if (!isAdmin) revert NotAdmin();
+
+        bool isMinterAdmin = token.hasRole(token.MINTER_ADMIN_ROLE(), msg.sender);
+        require(isMinterAdmin);
+        bool isRedeemerAdmin = token.hasRole(token.REDEEMER_ADMIN_ROLE(), msg.sender);
+        require(isRedeemerAdmin);
 
         SFLUVZapperv1 impl = new SFLUVZapperv1();
 

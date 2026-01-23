@@ -33,7 +33,10 @@ contract SFLUVZapperv1 is
     ISFLUVZapperErrors
 {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER");
+    bytes32 public constant MINTER_ADMIN_ROLE = keccak256("MINTER_ADMIN");
+
     bytes32 public constant REDEEMER_ROLE = keccak256("REDEEMER");
+    bytes32 public constant REDEEMER_ADMIN_ROLE = keccak256("REDEEMER_ADMIN");
 
     /* STORAGE */
 
@@ -87,6 +90,9 @@ contract SFLUVZapperv1 is
         __Storage_init(_storage);
 
         _grantRole(DEFAULT_ADMIN_ROLE, _governance);
+
+        _setRoleAdmin(MINTER_ROLE, MINTER_ADMIN_ROLE);
+        _setRoleAdmin(REDEEMER_ROLE, REDEEMER_ADMIN_ROLE);
     }
 
     function __Storage_init(
@@ -149,7 +155,7 @@ contract SFLUVZapperv1 is
         (
             MessagingReceipt memory mReceipt,
             OFTReceipt memory oReceipt
-        ) = $.byusd.send(
+        ) = $.byusd.send{ value: fee.nativeFee }(
             lzParam,
             fee,
             address(this)
@@ -186,7 +192,6 @@ contract SFLUVZapperv1 is
     }
 
     /* INTERNAL */
-
 
     function _zapInTo(uint256 amount, address to) private {
         SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
@@ -231,103 +236,109 @@ contract SFLUVZapperv1 is
     }
 
     function _unwrapSwapAndBridge(uint256 amount, SendParam calldata lzParam) private
-    returns (MessagingReceipt memory, OFTReceipt memory)
-    {
-    console.log("LZParam passed in:");
-    console.log(" dstEid:", lzParam.dstEid);
-    console.logBytes32(lzParam.to);
-    console.log(" amountLD:", lzParam.amountLD);
-    console.log(" minAmountLD:", lzParam.minAmountLD);
-    console.log("amount of SLFUV to unwrap:", amount);
+        returns (MessagingReceipt memory, OFTReceipt memory) {
+        console.log("LZParam passed in:");
+        console.log(" dstEid:", lzParam.dstEid);
+        console.logBytes32(lzParam.to);
+        console.log(" amountLD:", lzParam.amountLD);
+        console.log(" minAmountLD:", lzParam.minAmountLD);
+        console.log("amount of SFLUV to unwrap:", amount);
 
-    SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
-    // 1. Pull SFLUV
-    bool success = $.sfluv.transferFrom(_msgSender(), address(this), amount);
-    if (!success) revert TransferFailed(address($.sfluv), address(this), _msgSender(), amount);
-    console.log("SFLUV transferred into Zapper contract:", amount);
+        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+        // 1. Pull SFLUV
+        bool success = $.sfluv.transferFrom(_msgSender(), address(this), amount);
+        if (!success) revert TransferFailed(address($.sfluv), address(this), _msgSender(), amount);
+        console.log("SFLUV transferred into Zapper contract:", amount);
 
-    // 2. Unwrap to HONEY
-    success = $.sfluv.withdrawTo(address(this), amount);
-    if (!success) revert RedeemFailed();
-    uint256 honeyBalance = $.honey.balanceOf(address(this));
-    console.log("HONEY balance after redeem:", honeyBalance);
+        // 2. Unwrap to HONEY
+        success = $.sfluv.withdrawTo(address(this), amount);
+        if (!success) revert RedeemFailed();
+        uint256 honeyBalance = $.honey.balanceOf(address(this));
+        console.log("HONEY balance after redeem:", honeyBalance);
 
-    //2.5 tracking BYUSD before redeem/swap process just in case not enough is gotten
-    uint256 byusdBefore = $.byusd.balanceOf(address(this));
-    console.log("BYUSD balance before redeem/swap:", byusdBefore);
+        // 2.5 tracking BYUSD before redeem/swap process just in case not enough is gotten
+        uint256 byusdBefore = $.byusd.balanceOf(address(this));
+        console.log("BYUSD balance before redeem/swap:", byusdBefore);
 
-    // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
-    uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault);
+        // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
+        uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault);
 
-    if (byusdAvailable > 0) {
-        uint256 byusdAvailableInHoney = byusdAvailable * 1e12; // 6 → 18
-        uint256 redeemAmount = honeyBalance < byusdAvailableInHoney
-            ? honeyBalance
-            : byusdAvailableInHoney;
+        if (byusdAvailable > 0) {
+            uint256 byusdAvailableInHoney = byusdAvailable * 1e12; // 6 → 18
+            uint256 redeemAmount = honeyBalance < byusdAvailableInHoney
+                ? honeyBalance
+                : byusdAvailableInHoney;
 
+            $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
+            honeyBalance -= redeemAmount;
+            console.log("Redeemed BYUSD from HONEY:", redeemAmount / 1e12);
+        }
 
-        $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
-        honeyBalance -= redeemAmount;
-        console.log("Redeemed BYUSD from HONEY:", redeemAmount / 1e12);
-    }
+        // 4. Swap remaining HONEY via pool if needed
+        if (honeyBalance > 0) {
+            (uint160 sqrtPriceX96,,,,,,) = $.honeyToBYUSDPool.slot0();
 
-    // 4. Swap remaining HONEY via pool if needed
-    if (honeyBalance > 0) {
-        (uint160 sqrtPriceX96,,,,,,) = $.honeyToBYUSDPool.slot0();
+            // 95% minimum output
+            // sqrt(1 / 0.95) ≈ 1.025978352
+            uint256 NUM = 1_025_978_352; // scaled by 1e9
+            uint256 DEN = 1_000_000_000;
 
-        // 95% minimum output
-        // sqrt(1 / 0.95) ≈ 1.025978352
-        uint256 NUM = 1_025_978_352; // scaled by 1e9
-        uint256 DEN = 1_000_000_000;
+            uint160 sqrtPriceLimitX96 = uint160(
+                (uint256(sqrtPriceX96) * NUM) / DEN
+            );
 
-        uint160 sqrtPriceLimitX96 = uint160(
-            (uint256(sqrtPriceX96) * NUM) / DEN
+            $.honeyToBYUSDPool.swap(
+                address(this),
+                false,
+                int256(honeyBalance),
+                sqrtPriceLimitX96,
+                ""
+            );
+            console.log("Swapped remaining HONEY for BYUSD:", honeyBalance);
+        }
+
+        uint256 byusdAfter = $.byusd.balanceOf(address(this));
+        console.log("BYUSD balance after redeem/swap:", byusdAfter);
+        uint256 byusdAccumulated = byusdAfter - byusdBefore;
+        console.log("amount we're comparing BYUSD accumulated against:", lzParam.amountLD * 95 / 100);
+        console.log("BYUSD accumulated from redeem/swap:", byusdAccumulated);
+        require(byusdAccumulated >= (lzParam.amountLD * 95 / 100), "insufficient BYUSD from swap/redemption");
+
+        // 5. Bridge final BYUSD balance
+        MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);
+        require(
+        $.byusd.balanceOf(address(this)) >= lzParam.amountLD,
+        "insufficient BYUSD after swap"
         );
 
-        $.honeyToBYUSDPool.swap(
-            address(this),
-            false,
-            int256(honeyBalance),
-            sqrtPriceLimitX96,
-            ""
-        );
-        console.log("Swapped remaining HONEY for BYUSD:", honeyBalance);
+        console.log("Zapper Bera balance before bridging:", address(this).balance);
+        console.log("Native fee for bridging:", fee.nativeFee);
+        console.log("LZ token fee for bridging:", fee.lzTokenFee);
+        console.log("Address of this contract:", address(this));
+        console.log("BYUSD's bera balance before bridging:", address($.byusd).balance);
+        console.log("zapper BYUSD balance before bridging:", $.byusd.balanceOf(address(this)));
+        console.logBytes32(lzParam.to);
+        (
+                MessagingReceipt memory mReceipt,
+                OFTReceipt memory oReceipt
+            ) = $.byusd.send{ value: fee.nativeFee }(lzParam, fee, address(this));
+
+        console.log("zapper BYUSD balance after bridging:", $.byusd.balanceOf(address(this)));
+        console.log("Bridging BYUSD amountLD:", lzParam.amountLD);
+        return (mReceipt, oReceipt);
     }
 
-    uint256 byusdAfter = $.byusd.balanceOf(address(this));
-    console.log("BYUSD balance after redeem/swap:", byusdAfter);
-    uint256 byusdAccumulated = byusdAfter - byusdBefore;
-    console.log("amount we're comparing BYUSD accumulated against:", lzParam.amountLD * 95 / 100);
-    console.log("BYUSD accumulated from redeem/swap:", byusdAccumulated);
-    require(byusdAccumulated >= (lzParam.amountLD * 95 / 100), "insufficient BYUSD from swap/redemption");
+    // allow receipt of BERA
+    receive() external payable {}
 
-    // 5. Bridge final BYUSD balance
-    MessagingFee memory fee = $.byusd.quoteSend(lzParam, false);
-    fee.nativeFee = fee.nativeFee * 10;
-    require(
-    $.byusd.balanceOf(address(this)) >= lzParam.amountLD,
-    "insufficient BYUSD after swap"
-    );
-
-    console.log("Zapper Bera balance before bridging:", address(this).balance);
-    console.log("Native fee for bridging:", fee.nativeFee);
-    console.log("LZ token fee for bridging:", fee.lzTokenFee);
-    console.log("Address of this contract:", address(this));
-    console.log("BYUSD's bera balance before bridging:", address($.byusd).balance);
-    console.log("zapper BYUSD balance before bridging:", $.byusd.balanceOf(address(this)));
-    console.logBytes32(lzParam.to);
-    (
-            MessagingReceipt memory mReceipt,
-            OFTReceipt memory oReceipt
-        ) = $.byusd.send{ value: fee.nativeFee }(lzParam, fee, address(this));
-
-    console.log("zapper BYUSD balance after bridging:", $.byusd.balanceOf(address(this)));
-    console.log("Bridging BYUSD amountLD:", lzParam.amountLD);
-    return (mReceipt, oReceipt);
-}
-
-
-
+    function recoverTo(address payable to) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        SFLUVZapperStorage storage $ = _getSFLUVZapperStorage();
+        to.send(address(this).balance); // recover all native funds
+        uint256 byusdBalance = $.byusd.balanceOf(address(this));
+        if (byusdBalance > 0) {
+            $.byusd.approve(to, byusdBalance); // recover all byusd funds
+        }
+    }
 
     function _authorizeUpgrade(
         address newImplementation

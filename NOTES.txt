@@ -41,3 +41,10 @@ src/SFLUVv2.sol:SFLUVv2 \
 --etherscan-api-key WMP6HJHJ9NAK8A63SNAG1G4KHAUKU5X4SQ \
 --verifier-url 'https://api.berascan.com/api' \
 --watch
+
+# deploy zapper
+forge script script/DeploySFLUVZapperv1.s.sol:DeploySFLUVZapperv1 --rpc-url https://rpc.berachain.com --private-key $PRIVATE_KEY --broadcast
+0xE82b2109f437fB66C1C09dc0ff95b0435C7836C4
+
+# grant zapper mainnet
+forge script script/GrantSFLUVZapperv1.s.sol:GrantSFLUVZapperv1 --rpc-url https://rpc.berachain.com --private-key $PRIVATE_KEY --broadcast
