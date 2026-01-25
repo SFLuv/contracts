@@ -17,7 +17,6 @@ contract DeploySFLUVZapperv1 is Script, IDeployErrors {
         address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
         address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
 
-
         SFLUVZapperStorageInit memory s = SFLUVZapperStorageInit(
             honeyFactory,
             sfluv,
