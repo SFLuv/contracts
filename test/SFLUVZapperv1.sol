@@ -15,6 +15,9 @@ import { IBYUSD } from "../src/SFLUVZapperv1.sol";
 import { IOFT, SendParam, OFTReceipt } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import { MessagingReceipt, MessagingFee } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 import "forge-std/console.sol";
+import { Honey } from "lib/bera-contracts/src/honey/Honey.sol";
+import { ILiquidityPool} from "../src/ILiquidityPool.sol";
+
 
 
 interface IWBERA {
@@ -35,10 +38,13 @@ contract SFLUVZapperTest is Test {
     SFLUVZapperv1 public testSFLUVZapper;
     IBYUSD public testBYUSD;
     IWBERA public wbera;
+    Honey public honeyToken;
+    ILiquidityPool public liquidityPool;
 
     address internal peon;
     address vitEth = address(0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045);
     address defaultAdmin = address(0x90496e23825aD0C8107d04671e6a27f30630Fc35);
+
 
     uint public oneEther = 1 ether; // TODO: elsewhere?
 
@@ -63,10 +69,13 @@ contract SFLUVZapperTest is Test {
         wbera = IWBERA(wrappedNative);
         testLUVCoin = SFLUVv2(sfluv);
         testBYUSD = IBYUSD(byusd);
+        liquidityPool = ILiquidityPool(honeyToBYUSDPool);
         testSFLUVZapper = new SFLUVZapperv1();
 
         peon = makeAddr("peon");
         address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
+        honeyToken = Honey(honey);
+
 
         SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
             honeyFactory,
@@ -236,6 +245,50 @@ contract SFLUVZapperTest is Test {
     assert(endingLUVBalance < startingLUVBalance);
 
     vm.stopPrank();
+}
+
+    function testLiquidityPool () public {
+        console.log("Honey Balance of Whale", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
+        console.log("Honey Decimals", honeyToken.decimals());
+        vm.startPrank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+        honeyToken.transfer(address(testSFLUVZapper), 1000 * 1e18);
+        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
+        vm.stopPrank();
+
+        (
+        uint160 sqrtPriceX96,,
+        ,
+        ,
+        ,
+        ,
+) = liquidityPool.slot0();
+
+    console.log("Slo0 contents:");
+    console.log(" sqrtPriceX96:", sqrtPriceX96);
+            // 95% minimum output
+            // sqrt(1 / 0.95) ≈ 1.025978352
+        uint256 NUM = 1_025_978_352; // scaled by 1e9
+        uint256 DEN = 1_000_000_000;
+
+        uint256 sqrtPriceLimitX96 = uint256(
+            (uint256(sqrtPriceX96) * NUM) / DEN
+        );
+
+        vm.startPrank(address(testSFLUVZapper));
+        liquidityPool.swap(
+            address(testSFLUVZapper),
+            false,
+            int256(500 * 1e18),
+            uint160(sqrtPriceLimitX96),
+            ""
+        );
+        vm.stopPrank();
+
+        console.log("BYUSD Balance of Zapper", testBYUSD.balanceOf(address(testSFLUVZapper)));
+        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
+        assert(testBYUSD.balanceOf(address(testSFLUVZapper)) > 490000000);
+        assert(honeyToken.balanceOf(address(testSFLUVZapper)) < 510000000000000000000);
 }
 
     }

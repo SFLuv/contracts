@@ -272,6 +272,8 @@ contract SFLUVZapperv1 is
         // *** this gets the balance of BYUSD in HONEY in BYUSD decimals
         // uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault) - byusdCurrentFees;
         uint256 byusdCurrentFees = hf.collectedAssetFees(address($.byusd));
+        console.log("BYUSD current fees in HONEY and BYUSD:", byusdCurrentFees / 1e12, byusdCurrentFees);
+        console.log("BYUSD vault balance in HONEY and BYUSD:", hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)) / 1e12, hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)));
         // this gets the balance of BYUSD in HONEY decimals - i.e. 'shares'
         uint256 byusdAvailableInHoney = hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)) - byusdCurrentFees;
 
