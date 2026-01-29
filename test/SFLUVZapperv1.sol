@@ -55,148 +55,211 @@ contract SFLUVZapperTest is Test {
     error AccessControlUnauthorizedAccount(address account, bytes32 role);
 
 
-    function setUp() public {
-
-        string memory forkURL = vm.envString('FORK_URL');
-        uint256 forkBlock = vm.envUint('FORK_BLOCK');
-
-
-        vm.createSelectFork(forkURL, forkBlock);
-        address sfluv = vm.envAddress('SFLUV_ADDRESS');
-        address byusd = vm.envAddress("BYUSD_ADDRESS");
-        address honey = vm.envAddress("HONEY_ADDRESS");
-        address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
-        address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
-        address wrappedNative = vm.envAddress("WRAPPED_NATIVE_ADDRESS");
-        address honeyFactoryAddress = vm.envAddress("HONEY_FACTORY_ADDRESS");
-        wbera = IWBERA(wrappedNative);
-        testLUVCoin = SFLUVv2(sfluv);
-        testBYUSD = IBYUSD(byusd);
-        liquidityPool = ILiquidityPool(honeyToBYUSDPool);
-        testHoneyFactory = HoneyFactory(honeyFactoryAddress);
-        testSFLUVZapper = new SFLUVZapperv1();
-
-        peon = makeAddr("peon");
-        address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
-        honeyToken = Honey(honey);
+function setUp() public {
+    // Create fork using an old fork block with a heavily funded HONEY pool
+    string memory forkURL = vm.envString('FORK_URL');
+    uint256 forkBlock = vm.envUint('FORK_BLOCK');
+    vm.createSelectFork(forkURL, forkBlock);
 
 
-        SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
-            honeyFactory,
-            sfluv,
-            byusd,
-            honey,
-            honeyToBYUSDPool,
-            byusdVault
-        );
+    // Pull SFLUV Zapper storage variables from environment and set up other necessary addresses
+    address sfluv = vm.envAddress('SFLUV_ADDRESS');
+    address byusd = vm.envAddress("BYUSD_ADDRESS");
+    address honey = vm.envAddress("HONEY_ADDRESS");
+    address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
+    address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
+    address wrappedNative = vm.envAddress("WRAPPED_NATIVE_ADDRESS");
+    address honeyFactoryAddress = vm.envAddress("HONEY_FACTORY_ADDRESS");
+    peon = makeAddr("peon");
 
-        zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
-        testSFLUVZapper = SFLUVZapperv1(payable(zapperproxy));
-        vm.startPrank(defaultAdmin);
-        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), defaultAdmin);
-        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), defaultAdmin);
-        testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), address(testSFLUVZapper));
-        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), address(testSFLUVZapper));
-        vm.stopPrank();
-        }
+    // Create contract instances out of addresses
+    wbera = IWBERA(wrappedNative);
+    testLUVCoin = SFLUVv2(sfluv);
+    testBYUSD = IBYUSD(byusd);
+    liquidityPool = ILiquidityPool(honeyToBYUSDPool);
+    testHoneyFactory = HoneyFactory(honeyFactoryAddress);
+    honeyToken = Honey(honey);
 
+    // Create new Zapper instance
+    testSFLUVZapper = new SFLUVZapperv1();
 
-    function testPermissionedWrappingFunctionality() public {
-        // For easy decimal conversion
-        uint byusdExp = 10**testBYUSD.decimals();
-        uint sfluvExp = 10**testLUVCoin.decimals();
-        // This should not change because we cut off the fork at a determined block, but just in case
-        uint startingAdminLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
-        // Prank w/ BYUSD whale address
-        vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
-        // Transfer from BYUSD Whale acct to defaultAdmin
-        testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
-        //Prank w defaultAdmin account
-        vm.startPrank(defaultAdmin);
-        // defaultAdmin approves the SFLUV zapper to move 100 of its (defaultAdmin's) BYUSD
-        testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
-        //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
-        testSFLUVZapper.zapIn(50 * byusdExp);
-        vm.stopPrank();
-        // assert that defaultAdmin has 50 sfluv (50 more than it had before) and 950 byusd
-        assert(testLUVCoin.balanceOf(defaultAdmin) == ((50 * sfluvExp) + startingAdminLUVBalance));
-        assert(testBYUSD.balanceOf(defaultAdmin) == 950 * byusdExp);
+    // Set up storage struct by calling initialize using addresses from environment variables
+    SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
+        honeyFactoryAddress,
+        sfluv,
+        byusd,
+        honey,
+        honeyToBYUSDPool,
+        byusdVault
+    );
+
+    // Deploy proxy pointing to zapper implementation
+    zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
+
+    // Cast proxy address to zapper interface and make it payable
+    testSFLUVZapper = SFLUVZapperv1(payable(zapperproxy));
+
+    // Prank from defaultAdmin to give necessary permissions
+    vm.startPrank(defaultAdmin);
+    testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), defaultAdmin);
+    testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), defaultAdmin);
+    testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), address(testSFLUVZapper));
+    testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), address(testSFLUVZapper));
+    vm.stopPrank();
     }
 
-    function testUnpermissionedWrappingFunctionality() public {
-        // For easy decimal conversion
-        uint byusdExp = 10**testBYUSD.decimals();
-        uint sfluvExp = 10**testLUVCoin.decimals();
-        // Prank w/ BYUSD whale address
-        vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
-        // Transfer from BYUSD Whale acct to peon
-        testBYUSD.transfer(peon, 1000 * byusdExp);
-        // Prank w peon
-        vm.startPrank(peon);
-        // peon approves the SFLUV zapper to move 100 of its (peon's) BYUSD
-        testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
-        bytes32 myRole = testSFLUVZapper.MINTER_ROLE();
-        //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
-        vm.expectRevert(abi.encodeWithSelector(
-        AccessControlUnauthorizedAccount.selector,
-        peon,
-        myRole
-        ));
-        testSFLUVZapper.zapIn(50 * byusdExp);
-    }
 
-    function testUnwrappingFunctionality() public {
-       // For easy decimal conversion
-        uint byusdExp = 10**testBYUSD.decimals();
-        uint sfluvExp = 10**testLUVCoin.decimals();
-        uint honeyCharge = 5 * byusdExp;
-        uint denominator = 10000;
-        uint honeyFee = honeyCharge / denominator;
-        uint conversionAmount = 25;
-        uint honeyRake = honeyFee * conversionAmount;
-        // This should not change because we cut off the fork at a determined block, but just in case
-        uint startingAdminLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
-        uint startingAdminBYUSDBalance = testBYUSD.balanceOf(defaultAdmin);
-        // Prank w defaultAdmin account
-        vm.startPrank(defaultAdmin);
-        // defaultAdmin approves the SFLUV zapper to move 100 of its (defaultAdmin's) SFLUV
-        testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
-        //SFLUV zapper takes 25 SFLUV to be converted to BYUSD
-        testSFLUVZapper.zapOut(conversionAmount * sfluvExp);
-        vm.stopPrank();
-        // assert that defaultAdmin has 25 less SFLUV that it started with, and 975 byusd
-        assert(testLUVCoin.balanceOf(defaultAdmin) == (startingAdminLUVBalance - (conversionAmount * sfluvExp)));
-        assert(testBYUSD.balanceOf(defaultAdmin) == ((conversionAmount * byusdExp) - (honeyRake)));
-    }
+function testPermissionedWrappingFunctionality() public {
+    // For easy decimal conversion
+    uint byusdExp = 10**testBYUSD.decimals();
+    uint sfluvExp = 10**testLUVCoin.decimals();
+    // This should not change because we cut off the fork at a determined block, but just in case
+    uint startingAdminLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
+    // Prank w/ BYUSD whale address
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    // Transfer from BYUSD Whale acct to defaultAdmin
+    testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
+    //Prank w defaultAdmin account
+    vm.startPrank(defaultAdmin);
+    // defaultAdmin approves the SFLUV zapper to move 100 of its (defaultAdmin's) BYUSD
+    testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+    //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
+    testSFLUVZapper.zapIn(50 * byusdExp);
+    vm.stopPrank();
+    // assert that defaultAdmin has 50 sfluv (50 more than it had before) and 950 byusd
+    assert(testLUVCoin.balanceOf(defaultAdmin) == ((50 * sfluvExp) + startingAdminLUVBalance));
+    assert(testBYUSD.balanceOf(defaultAdmin) == 950 * byusdExp);
+}
 
-    function testUnpermissionedUnwrappingFunctionality() public {
-       // For easy decimal conversion
-        uint byusdExp = 10**testBYUSD.decimals();
-        uint sfluvExp = 10**testLUVCoin.decimals();
-        // Prank w peon
-        vm.startPrank(peon);
-        // peon approves the SFLUV zapper to move 100 of its (peons) SFLUV
-        testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
-        bytes32 myRole = testSFLUVZapper.REDEEMER_ROLE();
-        //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
-        vm.expectRevert(abi.encodeWithSelector(
-        AccessControlUnauthorizedAccount.selector,
-        peon,
-        myRole
-        ));
-        testSFLUVZapper.zapOut(50 * byusdExp);
-        vm.stopPrank();
-    }
+function testUnpermissionedWrappingFunctionality() public {
+    // For easy decimal conversion
+    uint byusdExp = 10**testBYUSD.decimals();
+    uint sfluvExp = 10**testLUVCoin.decimals();
+    // Prank w/ BYUSD whale address
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    // Transfer from BYUSD Whale acct to peon
+    testBYUSD.transfer(peon, 1000 * byusdExp);
+    // Prank w peon
+    vm.startPrank(peon);
+    // peon approves the SFLUV zapper to move 100 of its (peon's) BYUSD
+    testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+    bytes32 myRole = testSFLUVZapper.MINTER_ROLE();
+    //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
+    vm.expectRevert(abi.encodeWithSelector(
+    AccessControlUnauthorizedAccount.selector,
+    peon,
+    myRole
+    ));
+    testSFLUVZapper.zapIn(50 * byusdExp);
+}
 
-    function testUnwrapSwapAndBridge() public {
+function testUnwrappingFunctionality() public {
+    // For easy decimal conversion
+    uint byusdExp = 10**testBYUSD.decimals();
+    uint sfluvExp = 10**testLUVCoin.decimals();
+    uint honeyCharge = 5 * byusdExp;
+    uint denominator = 10000;
+    uint honeyFee = honeyCharge / denominator;
+    uint conversionAmount = 25;
+    uint honeyRake = honeyFee * conversionAmount;
+    // This should not change because we cut off the fork at a determined block, but just in case
+    uint startingAdminLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
+    // Prank w defaultAdmin account
+    vm.startPrank(defaultAdmin);
+    // defaultAdmin approves the SFLUV zapper to move 100 of its (defaultAdmin's) SFLUV
+    testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
+    //SFLUV zapper takes 25 SFLUV to be converted to BYUSD
+    testSFLUVZapper.zapOut(conversionAmount * sfluvExp);
+    vm.stopPrank();
+    // assert that defaultAdmin has 25 less SFLUV that it started with, and 975 byusd
+    assert(testLUVCoin.balanceOf(defaultAdmin) == (startingAdminLUVBalance - (conversionAmount * sfluvExp)));
+    assert(testBYUSD.balanceOf(defaultAdmin) == ((conversionAmount * byusdExp) - (honeyRake)));
+}
+
+function testUnpermissionedUnwrappingFunctionality() public {
+    // For easy decimal conversion
+    uint byusdExp = 10**testBYUSD.decimals();
+    uint sfluvExp = 10**testLUVCoin.decimals();
+    // Prank w peon
+    vm.startPrank(peon);
+    // peon approves the SFLUV zapper to move 100 of its (peons) SFLUV
+    testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
+    bytes32 myRole = testSFLUVZapper.REDEEMER_ROLE();
+    //SFLUV zapper takes 50 BYUSD to be converted to SFLUV
+    vm.expectRevert(abi.encodeWithSelector(
+    AccessControlUnauthorizedAccount.selector,
+    peon,
+    myRole
+    ));
+    testSFLUVZapper.zapOut(50 * byusdExp);
+    vm.stopPrank();
+}
+
+function testUnwrapRedeemAndBridge() public {
+
+    // Setup decimal helpers
+    uint256 byusdExp = 10**testBYUSD.decimals();
+    uint256 sfluvExp = 10**testLUVCoin.decimals();
+
+    // Send some BYUSD to defaultAdmin from whale
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
+
+    // Send some BYUSD to SFLuvZapper from whale
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(address(testSFLUVZapper), 100 * byusdExp);
+
+    // Fund zapper and BYUSD contract with BERA for messaging fees
+    vm.deal(address(testSFLUVZapper), 100 * sfluvExp);
+    vm.deal(address(testBYUSD), 100 * sfluvExp);
+
+    // Default Admin approves zapper to move $100 worth of BYUSD and SFLUV
+    vm.startPrank(defaultAdmin);
+    testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+    testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
+
+
+
+    // Record original SFLUV balance then wrap 50 BYUSD into SFLUV
+    uint256 orininalBalance = testLUVCoin.balanceOf(address(defaultAdmin));
+    testSFLUVZapper.zapIn(50 * byusdExp);
+
+    //Check that that the default admin has correct SFLUV balance
+    assert(testLUVCoin.balanceOf(defaultAdmin) == (50 * sfluvExp) + orininalBalance);
+
+
+    // Call unwrap/swap/bridge - honey is funded with enough BYUSD in this test so the liquidity pool is not used
+    (MessagingReceipt memory mReceipt, OFTReceipt memory oReceipt) =
+        testSFLUVZapper.unwrapSwapAndBridge(50 * sfluvExp, vitEth);
+
+    vm.stopPrank();
+
+    // Logging MessagingReceipt for inspection
+    console.log("MessagingReceipt:");
+    console.logBytes32(mReceipt.guid);
+    console.log(" nonce:", mReceipt.nonce);
+    console.log(" messaging fee - nativeFee:", mReceipt.fee.nativeFee);
+    console.log(" messaging fee - lzTokenFee:", mReceipt.fee.lzTokenFee);
+
+    // Logging OFTReceipt for inspection, assert that the amount sent is correct
+    console.log("OFTReceipt:");
+    console.log(" amountSent:", oReceipt.amountSentLD);
+    console.log(" amountRecieved:", oReceipt.amountReceivedLD);
+    assert(oReceipt.amountSentLD == 50 * byusdExp);
+
+
+       // Verify SFLUV is now back to original balance
+   assert(testLUVCoin.balanceOf(defaultAdmin) == orininalBalance);
+}
+
+function testUnwrapSplitRedeemBridge() public {
 
     // Switch to fork where HONEY is barely funded with BYUSD
     string memory forkURL = vm.envString('FORK_URL');
     uint256 currentBlockFork = vm.envUint('UP_TO_DATE_FORK_BLOCK');
     vm.createSelectFork(forkURL, currentBlockFork);
-     // ----------------------------
-    // Setup SFLUVZapper
-    // ----------------------------
+
+    // Setup SFLUVZapper, same as in setUp(), this is necesary because we switched forks and the new fork doesn't have the zapper deployed yet
     address sfluv = vm.envAddress('SFLUV_ADDRESS');
     address byusd = vm.envAddress("BYUSD_ADDRESS");
     address honey = vm.envAddress("HONEY_ADDRESS");
@@ -223,12 +286,10 @@ contract SFLUVZapperTest is Test {
         testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), address(testSFLUVZapper));
         testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), address(testSFLUVZapper));
     vm.stopPrank();
-    // ----------------------------
+
     // Setup decimal helpers
-    // ----------------------------
     uint256 byusdExp = 10**testBYUSD.decimals();
     uint256 sfluvExp = 10**testLUVCoin.decimals();
-    console.log("Is BYUSD Pegged?:", testHoneyFactory.isPegged(address(testBYUSD)));
 
     // Send some BYUSD to defaultAdmin from whale
     vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
@@ -238,121 +299,94 @@ contract SFLUVZapperTest is Test {
     vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
     testBYUSD.transfer(address(testSFLUVZapper), 100 * byusdExp);
 
+    // Fund zapper and BYUSD contract with BERA for messaging fees
     vm.deal(address(testSFLUVZapper), 100 * sfluvExp);
-    console.log("SFLUVZapper BERA balance:", address(testSFLUVZapper).balance);
     vm.deal(address(testBYUSD), 100 * sfluvExp);
-    console.log("BYUSD BERA balance:", address(testBYUSD).balance);
 
-    console.log("approving zapper");
-    console.log("New Zapper Address:", address(testSFLUVZapper));
+    // Record starting SFLUV balance
+    uint256 startingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
+
+    // Transfer 100 SFLUV from whale to defaultAdmin
     vm.startPrank(sfluvWhale);
     testLUVCoin.transfer(defaultAdmin, 100 * sfluvExp);
     vm.stopPrank();
-    // Approve zapper
+
+    // Approve zapper to move defaultAdmin's BYUSD and SFLUV
     vm.startPrank(defaultAdmin);
     testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
     testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
-    console.log("BYUSD Vault Balance before zapin:", testBYUSD.balanceOf(vm.envAddress("BYUSD_VAULT_ADDRESS")));
-    console.log("SFLUV whale SFLUV balance:", testLUVCoin.balanceOf(sfluvWhale));
 
+    // Wrap 50 BYUSD into SFLUV first, and assert that the BYUSD vault balance is now just barely above 50
+    uint byusdAmountToWrap = 50 * byusdExp;
+    uint amountPlusBuffer = byusdAmountToWrap + 3e6; // adding 5 BYUSD buffer
+    testSFLUVZapper.zapIn(byusdAmountToWrap);
+    assert(testBYUSD.balanceOf(vm.envAddress("BYUSD_VAULT_ADDRESS")) <= amountPlusBuffer);
 
-    // Wrap 50 BYUSD into SFLUV first
-    testSFLUVZapper.zapIn(50 * byusdExp);
+    // Assert that defaultAdmin has at least 149 extra SFLUV now (this accounts for a 1% at max ZapIn slippage)
+    assert(testLUVCoin.balanceOf(defaultAdmin) >= (149 * sfluvExp) + startingLUVBalance);
 
-    uint256 startingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
-    console.log("Starting SFLUV balance:", startingLUVBalance);
-    console.log("BYUSD Vault Balance: ", testBYUSD.balanceOf(vm.envAddress("BYUSD_VAULT_ADDRESS")));
-    console.log("Collected fees call before unwrap:", testHoneyFactory.collectedAssetFees(address(testBYUSD)));
+    // Reset starting LUV balance to current balance
+    startingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
 
-    // ----------------------------
-    // Call unwrap/swap/bridge
-    // ----------------------------
+    // Call unwrap/swap/bridge - honey is underfunded with BYUSD in this test so the liquidity pool is used
     (MessagingReceipt memory mReceipt, OFTReceipt memory oReceipt) =
         testSFLUVZapper.unwrapSwapAndBridge(100 * sfluvExp, vitEth);
+    vm.stopPrank();
 
-    // ----------------------------
+
     // Logging receipts for inspection
-    // ----------------------------
     console.log("MessagingReceipt:");
     console.logBytes32(mReceipt.guid);
     console.log(" nonce:", mReceipt.nonce);
     console.log(" messaging fee - nativeFee:", mReceipt.fee.nativeFee);
     console.log(" messaging fee - lzTokenFee:", mReceipt.fee.lzTokenFee);
 
-
-
+    // Logging OFTReceipt for inspection, assert that the amount sent is correct
     console.log("OFTReceipt:");
     console.log(" amountSent:", oReceipt.amountSentLD);
     console.log(" amountRecieved:", oReceipt.amountReceivedLD);
+    assert(oReceipt.amountSentLD == 100 * byusdExp);
 
-    // ----------------------------
-    // Verify SFLUV balance decreased
-    // ----------------------------
+    // Verify SFLUV balance decreased by 100
     uint256 endingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
-    console.log("Ending SFLUV balance:", endingLUVBalance);
-    assert(endingLUVBalance < startingLUVBalance);
-
-    vm.stopPrank();
+    assert(endingLUVBalance == startingLUVBalance - (100 * sfluvExp));
 }
 
-    function testLiquidityPool () public {
-        console.log("Honey Balance of Whale", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
-        console.log("Honey Decimals", honeyToken.decimals());
-        vm.startPrank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
-        honeyToken.transfer(address(testSFLUVZapper), 1000 * 1e18);
-        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
-        vm.stopPrank();
+function testLiquidityPool () public {
+    // Send some HONEY to the zapper from whale
+    vm.startPrank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    honeyToken.transfer(address(testSFLUVZapper), 1000 * 1e18);
+    vm.stopPrank();
 
-        (
-        uint160 sqrtPriceX96,,
-        ,
-        ,
-        ,
-        ,
-) = liquidityPool.slot0();
+    // Assert the zapper has 1000 HONEY
+    assert(honeyToken.balanceOf(address(testSFLUVZapper)) == 1000 * 1e18);
 
-    console.log("Slo0 contents:");
-    console.log(" sqrtPriceX96:", sqrtPriceX96);
-            // 95% minimum output
-            // sqrt(1 / 0.95) ≈ 1.025978352
-        uint256 NUM = 1_025_978_352; // scaled by 1e9
-        uint256 DEN = 1_000_000_000;
+    // Pull initial sqrtPriceX96 from the liquidity pool
+    (uint160 sqrtPriceX96,,,,,,) = liquidityPool.slot0();
 
-        uint256 sqrtPriceLimitX96 = uint256(
-            (uint256(sqrtPriceX96) * NUM) / DEN
-        );
+    // 95% minimum output
+    // sqrt(1 / 0.95) ≈ 1.025978352
+    // Determine slippage tolerance
+    uint256 NUM = 1_025_978_352; // scaled by 1e9
+    uint256 DEN = 1_000_000_000;
 
-        vm.startPrank(address(testSFLUVZapper));
-        liquidityPool.swap(
-            address(testSFLUVZapper),
-            false,
-            int256(500 * 1e18),
-            uint160(sqrtPriceLimitX96),
-            ""
-        );
-        vm.stopPrank();
+    uint256 sqrtPriceLimitX96 = uint256(
+        (uint256(sqrtPriceX96) * NUM) / DEN
+    );
 
-        console.log("BYUSD Balance of Zapper", testBYUSD.balanceOf(address(testSFLUVZapper)));
-        console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
-        assert(testBYUSD.balanceOf(address(testSFLUVZapper)) > 490000000);
-        assert(honeyToken.balanceOf(address(testSFLUVZapper)) < 510000000000000000000);
+    // swap 500 HONEY for BYUSD using the liquidity pool
+    vm.startPrank(address(testSFLUVZapper));
+    liquidityPool.swap(
+        address(testSFLUVZapper),
+        false,
+        int256(500 * 1e18),
+        uint160(sqrtPriceLimitX96),
+        ""
+    );
+    vm.stopPrank();
 
-
-    }
-
-    function testHoneyManipulation() public {
-        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        console.log("Is BYUSD Pegged?:", testHoneyFactory.isPegged(address(testBYUSD)));
-        vm.startPrank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
-        testBYUSD.approve(address(testHoneyFactory), 100 * 1e6);
-        testHoneyFactory.mint(address(testBYUSD), 100 * 1e6, 0x4Be03f781C497A489E3cB0287833452cA9B9E80B, false);
-        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        testHoneyFactory.redeem(address(testBYUSD), 100 * 1e18, 0x4Be03f781C497A489E3cB0287833452cA9B9E80B, false);
-        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
-        vm.stopPrank();
+    // Assert that after the swap, the zapper has more than 490 BYUSD and 500 HONEY
+    assert(testBYUSD.balanceOf(address(testSFLUVZapper)) > 490000000);
+    assert(honeyToken.balanceOf(address(testSFLUVZapper)) == 500000000000000000000);
     }
 }
