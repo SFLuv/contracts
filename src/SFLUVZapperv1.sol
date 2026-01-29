@@ -257,6 +257,7 @@ contract SFLUVZapperv1 is
         success = $.sfluv.withdrawTo(address(this), amount);
         if (!success) revert RedeemFailed();
         uint256 honeyBalance = $.honey.balanceOf(address(this));
+        console.log("HONEY balance:", honeyBalance);
 //        console.log("HONEY balance after redeem:", honeyBalance);
 
         // 2.5 tracking BYUSD before redeem/swap process just in case amount is insufficient
@@ -272,10 +273,13 @@ contract SFLUVZapperv1 is
         // *** this gets the balance of BYUSD in HONEY in BYUSD decimals
         // uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault) - byusdCurrentFees;
         uint256 byusdCurrentFees = hf.collectedAssetFees(address($.byusd));
-        console.log("BYUSD current fees in HONEY and BYUSD:", byusdCurrentFees / 1e12, byusdCurrentFees);
-        console.log("BYUSD vault balance in HONEY and BYUSD:", hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)) / 1e12, hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)));
+        console.log("BYUSD Vault from environment variables:", $.byusdVault);
+        console.log("BYUSD vault address from HoneyFactory:", address(hf.vaults(address($.byusd))));
+        console.log("BYUSD current fees:", byusdCurrentFees);
+        console.log("BYUSD vault balance in BYUSD:", $.byusd.balanceOf(address(hf.vaults(address($.byusd)))));
         // this gets the balance of BYUSD in HONEY decimals - i.e. 'shares'
-        uint256 byusdAvailableInHoney = hf.vaults(address($.byusd)).balanceOf(address($.honeyFactory)) - byusdCurrentFees;
+        uint256 byusdAvailableInHoney = ($.byusd.balanceOf(address(hf.vaults(address($.byusd)))) * 1e12) - (2 * byusdCurrentFees);
+        console.log("BYUSD available in HONEY:", byusdAvailableInHoney);
 
         if (byusdAvailableInHoney > 0) {
             uint256 redeemAmount = honeyBalance < byusdAvailableInHoney

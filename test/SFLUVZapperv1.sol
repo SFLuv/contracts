@@ -17,6 +17,7 @@ import { MessagingReceipt, MessagingFee } from "@layerzerolabs/lz-evm-protocol-v
 import "forge-std/console.sol";
 import { Honey } from "lib/bera-contracts/src/honey/Honey.sol";
 import { ILiquidityPool} from "../src/ILiquidityPool.sol";
+import { HoneyFactory } from "lib/bera-contracts/src/honey/HoneyFactory.sol";
 
 
 
@@ -40,6 +41,7 @@ contract SFLUVZapperTest is Test {
     IWBERA public wbera;
     Honey public honeyToken;
     ILiquidityPool public liquidityPool;
+    HoneyFactory public testHoneyFactory;
 
     address internal peon;
     address vitEth = address(0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045);
@@ -66,10 +68,12 @@ contract SFLUVZapperTest is Test {
         address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
         address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
         address wrappedNative = vm.envAddress("WRAPPED_NATIVE_ADDRESS");
+        address honeyFactoryAddress = vm.envAddress("HONEY_FACTORY_ADDRESS");
         wbera = IWBERA(wrappedNative);
         testLUVCoin = SFLUVv2(sfluv);
         testBYUSD = IBYUSD(byusd);
         liquidityPool = ILiquidityPool(honeyToBYUSDPool);
+        testHoneyFactory = HoneyFactory(honeyFactoryAddress);
         testSFLUVZapper = new SFLUVZapperv1();
 
         peon = makeAddr("peon");
@@ -185,11 +189,46 @@ contract SFLUVZapperTest is Test {
     }
 
     function testUnwrapSwapAndBridge() public {
+
+    // Switch to fork where HONEY is barely funded with BYUSD
+    string memory forkURL = vm.envString('FORK_URL');
+    uint256 currentBlockFork = vm.envUint('UP_TO_DATE_FORK_BLOCK');
+    vm.createSelectFork(forkURL, currentBlockFork);
+     // ----------------------------
+    // Setup SFLUVZapper
+    // ----------------------------
+    address sfluv = vm.envAddress('SFLUV_ADDRESS');
+    address byusd = vm.envAddress("BYUSD_ADDRESS");
+    address honey = vm.envAddress("HONEY_ADDRESS");
+    address honeyToBYUSDPool = vm.envAddress("HONEY_BYUSD_POOL_ADDRESS");
+    address byusdVault = vm.envAddress("BYUSD_VAULT_ADDRESS");
+    address honeyFactory = vm.envAddress("HONEY_FACTORY_ADDRESS");
+    address sfluvWhale = address(0x234D25189D22947C3B0a39959eEEfAc36c022BE0);
+
+    SFLUVZapperStorageInit memory testStorage = SFLUVZapperStorageInit(
+            honeyFactory,
+            sfluv,
+            byusd,
+            honey,
+            honeyToBYUSDPool,
+            byusdVault
+        );
+
+    testSFLUVZapper = new SFLUVZapperv1();
+    zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
+    testSFLUVZapper = SFLUVZapperv1(payable(zapperproxy));
+     vm.startPrank(defaultAdmin);
+        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), defaultAdmin);
+        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), defaultAdmin);
+        testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), address(testSFLUVZapper));
+        testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), address(testSFLUVZapper));
+    vm.stopPrank();
     // ----------------------------
     // Setup decimal helpers
     // ----------------------------
     uint256 byusdExp = 10**testBYUSD.decimals();
     uint256 sfluvExp = 10**testLUVCoin.decimals();
+    console.log("Is BYUSD Pegged?:", testHoneyFactory.isPegged(address(testBYUSD)));
 
     // Send some BYUSD to defaultAdmin from whale
     vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
@@ -205,22 +244,31 @@ contract SFLUVZapperTest is Test {
     console.log("BYUSD BERA balance:", address(testBYUSD).balance);
 
     console.log("approving zapper");
+    console.log("New Zapper Address:", address(testSFLUVZapper));
+    vm.startPrank(sfluvWhale);
+    testLUVCoin.transfer(defaultAdmin, 100 * sfluvExp);
+    vm.stopPrank();
     // Approve zapper
     vm.startPrank(defaultAdmin);
     testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
     testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
+    console.log("BYUSD Vault Balance before zapin:", testBYUSD.balanceOf(vm.envAddress("BYUSD_VAULT_ADDRESS")));
+    console.log("SFLUV whale SFLUV balance:", testLUVCoin.balanceOf(sfluvWhale));
 
-    // Wrap 100 BYUSD into SFLUV first
-    testSFLUVZapper.zapIn(100 * byusdExp);
+
+    // Wrap 50 BYUSD into SFLUV first
+    testSFLUVZapper.zapIn(50 * byusdExp);
 
     uint256 startingLUVBalance = testLUVCoin.balanceOf(defaultAdmin);
     console.log("Starting SFLUV balance:", startingLUVBalance);
+    console.log("BYUSD Vault Balance: ", testBYUSD.balanceOf(vm.envAddress("BYUSD_VAULT_ADDRESS")));
+    console.log("Collected fees call before unwrap:", testHoneyFactory.collectedAssetFees(address(testBYUSD)));
 
     // ----------------------------
     // Call unwrap/swap/bridge
     // ----------------------------
     (MessagingReceipt memory mReceipt, OFTReceipt memory oReceipt) =
-        testSFLUVZapper.unwrapSwapAndBridge(50 * sfluvExp, vitEth);
+        testSFLUVZapper.unwrapSwapAndBridge(100 * sfluvExp, vitEth);
 
     // ----------------------------
     // Logging receipts for inspection
@@ -289,6 +337,22 @@ contract SFLUVZapperTest is Test {
         console.log("Honey Balance of Zapper", honeyToken.balanceOf(address(testSFLUVZapper)));
         assert(testBYUSD.balanceOf(address(testSFLUVZapper)) > 490000000);
         assert(honeyToken.balanceOf(address(testSFLUVZapper)) < 510000000000000000000);
-}
+
 
     }
+
+    function testHoneyManipulation() public {
+        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        console.log("Is BYUSD Pegged?:", testHoneyFactory.isPegged(address(testBYUSD)));
+        vm.startPrank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+        testBYUSD.approve(address(testHoneyFactory), 100 * 1e6);
+        testHoneyFactory.mint(address(testBYUSD), 100 * 1e6, 0x4Be03f781C497A489E3cB0287833452cA9B9E80B, false);
+        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        testHoneyFactory.redeem(address(testBYUSD), 100 * 1e18, 0x4Be03f781C497A489E3cB0287833452cA9B9E80B, false);
+        console.log("Whale BYUSD Balance: ", testBYUSD.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        console.log("Whale Honey Balance: ", honeyToken.balanceOf(0x4Be03f781C497A489E3cB0287833452cA9B9E80B));
+        vm.stopPrank();
+    }
+}
