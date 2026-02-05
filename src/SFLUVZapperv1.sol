@@ -257,10 +257,7 @@ struct SFLUVZapperStorage {
 
         // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
         HoneyFactory hf = HoneyFactory(address($.honeyFactory));
-        // *** this gets the balance of BYUSD in HONEY in BYUSD decimals
-        // uint256 byusdAvailable = $.byusd.balanceOf($.byusdVault) - byusdCurrentFees;
         uint256 byusdCurrentFees = hf.collectedAssetFees(address($.byusd));
-        // this gets the balance of BYUSD in HONEY decimals - i.e. 'shares'
         uint256 byusdAvailableInHoney = ($.byusd.balanceOf(address(hf.vaults(address($.byusd)))) * 1e12) - (2 * byusdCurrentFees);
 
         if (byusdAvailableInHoney > 0) {
