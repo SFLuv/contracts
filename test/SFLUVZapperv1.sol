@@ -34,6 +34,7 @@ interface IWBERA {
     function deposit() external payable;
 }
 
+
 contract SFLUVZapperTest is Test {
     SFLUVv2 public testLUVCoin;
     SFLUVZapperv1 public testSFLUVZapper;
@@ -280,7 +281,7 @@ function testUnwrapSplitRedeemBridge() public {
     testSFLUVZapper = new SFLUVZapperv1();
     zapperproxy = new ERC1967Proxy(address(testSFLUVZapper), abi.encodeCall(testSFLUVZapper.initialize, (defaultAdmin, testStorage)));
     testSFLUVZapper = SFLUVZapperv1(payable(zapperproxy));
-     vm.startPrank(defaultAdmin);
+    vm.startPrank(defaultAdmin);
         testLUVCoin.grantRole(testLUVCoin.REDEEMER_ADMIN_ROLE(), defaultAdmin);
         testLUVCoin.grantRole(testLUVCoin.REDEEMER_ROLE(), defaultAdmin);
         testLUVCoin.grantRole(testLUVCoin.MINTER_ROLE(), address(testSFLUVZapper));
