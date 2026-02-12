@@ -257,16 +257,23 @@ struct SFLUVZapperStorage {
 
         // 3. Check BYUSD inside Honey, and keep track of how much is redeemed
         HoneyFactory hf = HoneyFactory(address($.honeyFactory));
-        uint256 byusdCurrentFees = hf.collectedAssetFees(address($.byusd));
-        uint256 byusdAvailableInHoney = ($.byusd.balanceOf(address(hf.vaults(address($.byusd)))) * 1e12) - (2 * byusdCurrentFees);
+        // If Honey is in basket mode for redeems, skip redeem and route entirely through pool swap.
+        if (!hf.isBasketModeEnabled(false)) {
+            uint256 byusdCurrentFees = hf.collectedAssetFees(address($.byusd));
+            uint256 byusdInVault = $.byusd.balanceOf(address(hf.vaults(address($.byusd)))) * 1e12;
+            uint256 redeemFeeBuffer = 2 * byusdCurrentFees;
+            uint256 byusdAvailableInHoney = byusdInVault > redeemFeeBuffer
+                ? byusdInVault - redeemFeeBuffer
+                : 0;
 
-        if (byusdAvailableInHoney > 0) {
-            uint256 redeemAmount = honeyBalance < byusdAvailableInHoney
-                ? honeyBalance
-                : byusdAvailableInHoney;
+            if (byusdAvailableInHoney > 0) {
+                uint256 redeemAmount = honeyBalance < byusdAvailableInHoney
+                    ? honeyBalance
+                    : byusdAvailableInHoney;
 
-            $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
-            honeyBalance -= redeemAmount;
+                $.honeyFactory.redeem(address($.byusd), redeemAmount, address(this), false);
+                honeyBalance -= redeemAmount;
+            }
         }
 
         // 4. Swap remaining HONEY via pool if needed

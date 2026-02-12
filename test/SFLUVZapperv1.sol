@@ -253,6 +253,44 @@ function testUnwrapRedeemAndBridge() public {
    assert(testLUVCoin.balanceOf(defaultAdmin) == orininalBalance);
 }
 
+function testUnwrapBasketModeUsesPoolSwapOnly() public {
+    uint256 byusdExp = 10**testBYUSD.decimals();
+    uint256 sfluvExp = 10**testLUVCoin.decimals();
+
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(defaultAdmin, 1000 * byusdExp);
+
+    vm.prank(0x4Be03f781C497A489E3cB0287833452cA9B9E80B);
+    testBYUSD.transfer(address(testSFLUVZapper), 100 * byusdExp);
+
+    vm.deal(address(testSFLUVZapper), 100 * sfluvExp);
+    vm.deal(address(testBYUSD), 100 * sfluvExp);
+
+    vm.startPrank(defaultAdmin);
+    testBYUSD.approve(address(testSFLUVZapper), 100 * byusdExp);
+    testLUVCoin.approve(address(testSFLUVZapper), 100 * sfluvExp);
+
+    uint256 originalBalance = testLUVCoin.balanceOf(address(defaultAdmin));
+    testSFLUVZapper.zapIn(50 * byusdExp);
+
+    vm.mockCall(
+        address(testHoneyFactory),
+        abi.encodeWithSelector(HoneyFactory.isBasketModeEnabled.selector, false),
+        abi.encode(true)
+    );
+    vm.mockCallRevert(
+        address(testHoneyFactory),
+        abi.encodeWithSelector(IHoneyFactory.redeem.selector),
+        "redeem path should be skipped in basket mode"
+    );
+
+    (, OFTReceipt memory oReceipt) = testSFLUVZapper.unwrapSwapAndBridge(50 * sfluvExp, vitEth);
+    vm.stopPrank();
+
+    assert(oReceipt.amountSentLD == 50 * byusdExp);
+    assert(testLUVCoin.balanceOf(defaultAdmin) == originalBalance);
+}
+
 function testUnwrapSplitRedeemBridge() public {
 
     // Switch to fork where HONEY is barely funded with BYUSD
