@@ -10,12 +10,13 @@ contract GrantSFLUVv2 is Script {
     address constant private SFLUV_V2_ADDR = 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e;
 
     // mainnet gov account
-    address constant private TARGET_ADDR = 0x90496e23825aD0C8107d04671e6a27f30630Fc35;
+    address constant private TARGET_ADDR = 0x8b631C26537a784082A55528eaD52271ce88572e;
 
     function run() public {
         vm.startBroadcast();
         SFLUVv2 impl = SFLUVv2(SFLUV_V2_ADDR);
-        impl.grantRole(impl.MINTER_ADMIN_ROLE(), TARGET_ADDR);
+        // impl.grantRole(impl.MINTER_ADMIN_ROLE(), TARGET_ADDR);
+        impl.grantRole(impl.REDEEMER_ROLE(), TARGET_ADDR);
         vm.stopBroadcast();
     }
 }
