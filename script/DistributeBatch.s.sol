@@ -10,8 +10,9 @@ import {SFLUVv3} from "../src/SFLUVv3.sol";
  *         depositFor for each holder, using the migration snapshot JSON.
  *
  *         This is the "use ERC20 mint/deposit internals" path from the runbook:
- *         each call transfers `amount` underlying USDC from the distributor to
- *         the v3 proxy and credits SFLUV to the holder. Total supply and backing
+ *         each call transfers remaining underlying USDC from the distributor to
+ *         the v3 proxy and credits SFLUV to the holder until the holder reaches
+ *         the desired balance in the migration snapshot. Total supply and backing
  *         stay coherent throughout.
  *
  * Env:
@@ -42,22 +43,28 @@ contract DistributeBatch is Script {
         require(addrs.length == amts.length, "len mismatch");
         require(addrs.length > 0, "empty snapshot");
 
-        // Preflight: sum, backing balance, allowance, idempotency.
+        // Preflight: calculate remaining amount to deposit per recipient.
+        uint256[] memory remaining = new uint256[](amts.length);
         uint256 total = 0;
-        for (uint256 i = 0; i < amts.length; ++i) total += amts[i];
+        for (uint256 i = 0; i < amts.length; ++i) {
+            uint256 current = sfluv.balanceOf(addrs[i]);
+            require(current <= amts[i], "recipient already over target");
+            uint256 delta = amts[i] - current;
+            remaining[i] = delta;
+            total += delta;
+        }
 
         require(backing.balanceOf(distributor) >= total, "distributor: insufficient USDC");
         require(backing.allowance(distributor, v3) >= total, "distributor: USDC allowance < total");
-        for (uint256 i = 0; i < addrs.length; ++i) {
-            require(sfluv.balanceOf(addrs[i]) == 0, "recipient already has SFLUV; refusing to double-credit");
-        }
 
         console.log("Recipients:", addrs.length);
-        console.log("Total USDC to wrap:", total);
+        console.log("Remaining USDC to wrap:", total);
 
         vm.startBroadcast();
         for (uint256 i = 0; i < addrs.length; ++i) {
-            sfluv.depositFor(addrs[i], amts[i]);
+            if (remaining[i] > 0) {
+                sfluv.depositFor(addrs[i], remaining[i]);
+            }
         }
         vm.stopBroadcast();
 

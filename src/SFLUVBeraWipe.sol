@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.26;
 
-import {ERC20WrapperUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
+import {
+    ERC20WrapperUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -10,22 +12,22 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @title SFLUVBeraWipe
  * @notice Berachain deprecation implementation. Phase 5 of the Celo migration.
  *
- *         When the v2 (or v2_1) proxy is upgraded to this contract via
- *         `upgradeToAndCall(SFLUVBeraWipe, encodeCall(wipeAndSweep, treasury))`,
- *         the call atomically:
- *           1. Transfers all underlying ERC20 (HONEY) balance directly from the
- *              proxy to `treasury`, bypassing ERC20Wrapper accounting and the
- *              REDEEMER_ROLE path. This is intentional per the runbook so the
- *              sweep is not coupled to wrapper invariants that may be deprecated.
- *           2. Marks the contract as wiped so the call cannot be repeated.
+ *         When the v2 (or v2_1) proxy is upgraded to this contract, writes are
+ *         immediately disabled but balances and backing assets remain in place.
+ *         Governance can still upgrade back to the previous ERC20 implementation
+ *         if Celo distribution verification fails.
  *
- *         After wipe, every user-facing token method (transfer, transferFrom,
+ *         After upgrade, every user-facing token method (transfer, transferFrom,
  *         approve, depositFor, withdrawTo) reverts with the migration message.
  *         Read-only methods (balanceOf, totalSupply, name, symbol, decimals,
  *         allowance) intentionally remain functional so block explorers and
  *         historical tooling continue to render the legacy state.
  *
- *         POINT OF NO RETURN: once executed, the Bera proxy has no path back.
+ *         The point of no return is the later owner-gated `sweepBacking` call,
+ *         which transfers all underlying ERC20 (HONEY) balance directly from the
+ *         proxy to treasury, bypassing ERC20Wrapper accounting and the
+ *         REDEEMER_ROLE path. This is intentionally asynchronous so operators can
+ *         verify Celo migration outputs before sweeping Berachain backing assets.
  *
  *         Storage safety:
  *         - Inherits the same parent chain in the same order as SFLUVv2 /
@@ -39,7 +41,7 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
 
     /// @custom:storage-location erc7201:sfluv.storage.BeraWipe
     struct BeraWipeStorage {
-        bool wiped;
+        bool backingSwept;
     }
 
     // keccak256(abi.encode(uint256(keccak256("sfluv.storage.BeraWipe")) - 1)) & ~bytes32(uint256(0xff))
@@ -54,9 +56,9 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
 
     // --- Events / errors ---
 
-    event WipeExecuted(address indexed treasury, address indexed underlyingToken, uint256 amountSwept);
+    event BackingSwept(address indexed treasury, address indexed underlyingToken, uint256 amountSwept);
 
-    error AlreadyWiped();
+    error BackingAlreadySwept();
     error SweepTransferFailed();
     error ZeroTreasury();
 
@@ -69,17 +71,17 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
-    // --- Wipe + sweep (one-shot) ---
+    // --- Sweep backing (one-shot, irreversible) ---
 
     /**
-     * @notice Sweep all underlying ERC20 balance to `treasury` and lock the contract.
-     *         Intended to be called atomically via `upgradeToAndCall`.
+     * @notice Sweep all underlying ERC20 balance to `treasury`.
+     *         Run only after Celo migration has been independently verified.
      */
-    function wipeAndSweep(address treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function sweepBacking(address treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (treasury == address(0)) revert ZeroTreasury();
         BeraWipeStorage storage $ = _wipeStore();
-        if ($.wiped) revert AlreadyWiped();
-        $.wiped = true;
+        if ($.backingSwept) revert BackingAlreadySwept();
+        $.backingSwept = true;
 
         IERC20 backing = underlying();
         uint256 amount = backing.balanceOf(address(this));
@@ -89,11 +91,15 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
             if (!ok) revert SweepTransferFailed();
         }
 
-        emit WipeExecuted(treasury, address(backing), amount);
+        emit BackingSwept(treasury, address(backing), amount);
+    }
+
+    function backingSwept() external view returns (bool) {
+        return _wipeStore().backingSwept;
     }
 
     function wiped() external view returns (bool) {
-        return _wipeStore().wiped;
+        return _wipeStore().backingSwept;
     }
 
     // --- User-facing reverts ---

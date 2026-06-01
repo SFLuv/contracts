@@ -27,10 +27,7 @@ contract SFLUVBeraWipeTest is Test {
         bob = makeAddr("bob");
 
         SFLUVv2 v2Impl = new SFLUVv2();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(v2Impl),
-            abi.encodeCall(v2Impl.initialize, (gov, honey))
-        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(v2Impl), abi.encodeCall(v2Impl.initialize, (gov, honey)));
         v2 = SFLUVv2(address(proxy));
 
         // Distribute some balances so we have meaningful state at wipe time.
@@ -50,26 +47,52 @@ contract SFLUVBeraWipeTest is Test {
         assertEq(v2.totalSupply(), 500 ether);
     }
 
-    function _upgradeAndWipe() internal returns (SFLUVBeraWipe) {
+    function _upgradeOnly() internal returns (SFLUVBeraWipe) {
         SFLUVBeraWipe impl = new SFLUVBeraWipe();
-        bytes memory initData = abi.encodeCall(SFLUVBeraWipe.wipeAndSweep, (treasury));
         vm.prank(gov);
-        v2.upgradeToAndCall(address(impl), initData);
+        v2.upgradeToAndCall(address(impl), "");
         return SFLUVBeraWipe(address(v2));
     }
 
     // --- Wipe semantics ---
 
-    function testUpgradeAndWipeSweepsUnderlyingToTreasury() public {
-        wiped = _upgradeAndWipe();
+    function testUpgradeOnlyLocksWritesButDoesNotSweep() public {
+        wiped = _upgradeOnly();
+
+        assertEq(honey.balanceOf(address(wiped)), 500 ether, "proxy backing retained");
+        assertEq(honey.balanceOf(treasury), 0, "treasury unchanged");
+        assertFalse(wiped.backingSwept(), "sweep flag");
+    }
+
+    function testCanUpgradeBackBeforeSweep() public {
+        wiped = _upgradeOnly();
+
+        SFLUVv2 replacement = new SFLUVv2();
+        vm.prank(gov);
+        wiped.upgradeToAndCall(address(replacement), "");
+
+        SFLUVv2 restored = SFLUVv2(address(wiped));
+        vm.prank(alice);
+        restored.transfer(bob, 10 ether);
+
+        assertEq(restored.balanceOf(alice), 190 ether);
+        assertEq(restored.balanceOf(bob), 310 ether);
+        assertEq(honey.balanceOf(address(restored)), 500 ether, "proxy backing retained");
+    }
+
+    function testSweepBackingTransfersUnderlyingToTreasury() public {
+        wiped = _upgradeOnly();
+
+        vm.prank(gov);
+        wiped.sweepBacking(treasury);
 
         assertEq(honey.balanceOf(address(wiped)), 0, "proxy drained");
         assertEq(honey.balanceOf(treasury), 500 ether, "treasury credited");
-        assertTrue(wiped.wiped(), "wiped flag");
+        assertTrue(wiped.backingSwept(), "sweep flag");
     }
 
     function testReadOnlyMethodsStillWork() public {
-        wiped = _upgradeAndWipe();
+        wiped = _upgradeOnly();
 
         // Legacy state remains visible to explorers / historical tooling.
         assertEq(wiped.balanceOf(alice), 200 ether);
@@ -80,7 +103,7 @@ contract SFLUVBeraWipeTest is Test {
     }
 
     function testAllWriteMethodsRevertWithMigrationMessage() public {
-        wiped = _upgradeAndWipe();
+        wiped = _upgradeOnly();
 
         string memory expected = "SFLuv has migrated to CELO.";
 
@@ -105,50 +128,64 @@ contract SFLUVBeraWipeTest is Test {
         wiped.withdrawTo(alice, 1);
     }
 
-    function testCannotWipeTwice() public {
-        wiped = _upgradeAndWipe();
+    function testCannotSweepBackingTwice() public {
+        wiped = _upgradeOnly();
 
         vm.prank(gov);
-        vm.expectRevert(SFLUVBeraWipe.AlreadyWiped.selector);
-        wiped.wipeAndSweep(treasury);
+        wiped.sweepBacking(treasury);
+
+        vm.prank(gov);
+        vm.expectRevert(SFLUVBeraWipe.BackingAlreadySwept.selector);
+        wiped.sweepBacking(treasury);
     }
 
-    function testWipeRequiresAdmin() public {
+    function testUpgradeRequiresAdmin() public {
         // Deploy the impl + try to upgrade as a non-admin.
         SFLUVBeraWipe impl = new SFLUVBeraWipe();
-        bytes memory initData = abi.encodeCall(SFLUVBeraWipe.wipeAndSweep, (treasury));
         vm.prank(alice);
         vm.expectRevert();
-        v2.upgradeToAndCall(address(impl), initData);
+        v2.upgradeToAndCall(address(impl), "");
     }
 
-    function testWipeRevertsOnZeroTreasury() public {
-        SFLUVBeraWipe impl = new SFLUVBeraWipe();
-        bytes memory initData = abi.encodeCall(SFLUVBeraWipe.wipeAndSweep, (address(0)));
+    function testSweepRequiresAdmin() public {
+        wiped = _upgradeOnly();
+
+        vm.prank(alice);
+        vm.expectRevert();
+        wiped.sweepBacking(treasury);
+    }
+
+    function testSweepRevertsOnZeroTreasury() public {
+        wiped = _upgradeOnly();
+
         vm.prank(gov);
-        vm.expectRevert(); // proxy bubbles the ZeroTreasury revert
-        v2.upgradeToAndCall(address(impl), initData);
+        vm.expectRevert(SFLUVBeraWipe.ZeroTreasury.selector);
+        wiped.sweepBacking(address(0));
     }
 
-    // --- Defensive: idle wipe (zero underlying) still locks the contract ---
+    // --- Defensive: idle sweep (zero underlying) still marks backing swept ---
 
-    function testWipeWithZeroBackingStillLocks() public {
+    function testSweepWithZeroBackingStillMarksSwept() public {
         // Drain backing first via a redeemer so the proxy holds zero HONEY.
-        vm.prank(gov);
-        v2.grantRole(v2.REDEEMER_ADMIN_ROLE(), gov);
-        vm.prank(gov);
-        v2.grantRole(v2.REDEEMER_ROLE(), alice);
+        bytes32 redeemerAdminRole = v2.REDEEMER_ADMIN_ROLE();
+        bytes32 redeemerRole = v2.REDEEMER_ROLE();
+        vm.startPrank(gov);
+        v2.grantRole(redeemerAdminRole, gov);
+        v2.grantRole(redeemerRole, alice);
+        v2.grantRole(redeemerRole, bob);
+        vm.stopPrank();
+
         vm.prank(alice);
         v2.withdrawTo(alice, 200 ether);
         // bob still holds 300; their backing is still in the proxy. Drain that too.
-        vm.prank(gov);
-        v2.grantRole(v2.REDEEMER_ROLE(), bob);
         vm.prank(bob);
         v2.withdrawTo(bob, 300 ether);
         assertEq(honey.balanceOf(address(v2)), 0);
 
-        wiped = _upgradeAndWipe();
-        assertTrue(wiped.wiped());
+        wiped = _upgradeOnly();
+        vm.prank(gov);
+        wiped.sweepBacking(treasury);
+        assertTrue(wiped.backingSwept());
 
         vm.expectRevert(bytes("SFLuv has migrated to CELO."));
         vm.prank(alice);

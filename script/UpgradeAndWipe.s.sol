@@ -6,15 +6,15 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {SFLUVBeraWipe} from "../src/SFLUVBeraWipe.sol";
 
 /**
- * @notice Phase 5: upgrade Berachain SFLUV to the wipe implementation and
- *         atomically sweep underlying ERC20 to treasury.
+ * @notice Phase 5a: upgrade Berachain SFLUV to the migration-lock implementation.
  *
- *         POINT OF NO RETURN. Run only after Celo cutover is fully verified
- *         per migration-plan.md.
+ *         This disables user-facing writes but does not sweep backing assets.
+ *         Governance can still upgrade back if Celo migration verification fails.
+ *         Run `SweepBeraBacking` only after all migration steps are complete and
+ *         manually verified.
  *
  * Env:
  *   SFLUV_V2_PROXY = 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e (mainnet)
- *   TREASURY       = sweep destination
  *
  * Recommended preflight: simulate against a Bera mainnet fork first.
  *
@@ -26,16 +26,14 @@ import {SFLUVBeraWipe} from "../src/SFLUVBeraWipe.sol";
 contract UpgradeAndWipe is Script {
     function run() public {
         address proxyAddr = vm.envAddress("SFLUV_V2_PROXY");
-        address treasury = vm.envAddress("TREASURY");
 
         vm.startBroadcast();
         SFLUVBeraWipe wipe = new SFLUVBeraWipe();
-        bytes memory data = abi.encodeCall(SFLUVBeraWipe.wipeAndSweep, (treasury));
-        UUPSUpgradeable(proxyAddr).upgradeToAndCall(address(wipe), data);
+        UUPSUpgradeable(proxyAddr).upgradeToAndCall(address(wipe), "");
         vm.stopBroadcast();
 
         console.log("Wipe impl:", address(wipe));
         console.log("Proxy:", proxyAddr);
-        console.log("Swept to:", treasury);
+        console.log("Backing sweep not executed.");
     }
 }
