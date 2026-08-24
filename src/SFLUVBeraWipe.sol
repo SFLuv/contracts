@@ -19,9 +19,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *
  *         After upgrade, every user-facing token method (transfer, transferFrom,
  *         approve, depositFor, withdrawTo) reverts with the migration message.
- *         Read-only methods (balanceOf, totalSupply, name, symbol, decimals,
- *         allowance) intentionally remain functional so block explorers and
- *         historical tooling continue to render the legacy state.
+ *         `balanceOf` and `totalSupply` are hardcoded to 0 so RPC-polling tools stop
+ *         reporting legacy Berachain balances. The remaining read-only methods (name,
+ *         symbol, decimals, allowance) intentionally remain functional so block
+ *         explorers and historical tooling continue to render the legacy state.
  *
  *         The point of no return is the later owner-gated `sweepBacking` call,
  *         which transfers all underlying ERC20 (HONEY) balance directly from the
@@ -124,11 +125,28 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
         revert(MIGRATION_MESSAGE);
     }
 
+    /// @notice Hardcoded to 0 so wallets and other RPC-polling tools stop showing
+    ///         legacy Berachain balances after the Celo migration. Does not clear the
+    ///         underlying balance storage and emits no events -- see the note below.
     function balanceOf(address) public pure override returns (uint256) {
         return 0;
     }
 
-    // Read-only methods (balanceOf, totalSupply, name, symbol, decimals, allowance,
-    // hasRole, etc.) inherit unchanged from the parent contracts so explorers and
-    // legacy tools continue to render the historical state.
+    /// @notice Hardcoded to 0 alongside `balanceOf` so the ERC-20 invariant
+    ///         sum(balanceOf) == totalSupply still holds for RPC readers. Backing was
+    ///         already swept, so the reported supply was unbacked regardless. Like
+    ///         `balanceOf`, this does not clear storage and emits no events.
+    function totalSupply() public pure override returns (uint256) {
+        return 0;
+    }
+
+    // Remaining read-only methods (name, symbol, decimals, allowance, hasRole, etc.)
+    // inherit unchanged from the parent contracts so explorers and legacy tools
+    // continue to render the historical state.
+    //
+    // NOTE: balanceOf and totalSupply are hardcoded to 0, but the underlying balance
+    // storage is left intact and no burn/Transfer events are emitted. Event-derived
+    // indexers (Ponder, subgraphs, Etherscan-family holder tables) therefore still
+    // report the legacy balances. Clearing those requires an actual burn pass via
+    // SFLUVv2_1.migrate(), which emits Transfer-to-zero per holder.
 }

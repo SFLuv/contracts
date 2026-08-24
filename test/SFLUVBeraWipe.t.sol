@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import "forge-std/console.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
@@ -91,15 +92,67 @@ contract SFLUVBeraWipeTest is Test {
         assertTrue(wiped.backingSwept(), "sweep flag");
     }
 
-    function testReadOnlyMethodsStillWork() public {
+    function testBalanceOfReportsZeroForEveryone() public {
         wiped = _upgradeOnly();
 
-        // Legacy state remains visible to explorers / historical tooling.
-        assertEq(wiped.balanceOf(alice), 200 ether);
-        assertEq(wiped.balanceOf(bob), 300 ether);
-        assertEq(wiped.totalSupply(), 500 ether);
+        // balanceOf is hardcoded to 0 so RPC-polling tools stop showing legacy balances.
+        assertEq(wiped.balanceOf(alice), 0);
+        assertEq(wiped.balanceOf(bob), 0);
+        assertEq(wiped.balanceOf(address(0)), 0);
+        assertEq(wiped.balanceOf(gov), 0);
+    }
+
+    function testMetadataStillReadable() public {
+        wiped = _upgradeOnly();
+
         assertEq(wiped.name(), "SFLUV V2.0");
         assertEq(wiped.symbol(), "SFLUV");
+        assertEq(wiped.decimals(), 18);
+    }
+
+    /// @dev balanceOf and totalSupply are zeroed together so the ERC-20 invariant
+    ///      sum(balanceOf) == totalSupply still holds for RPC readers.
+    function testTotalSupplyZeroedAlongsideBalances() public {
+        wiped = _upgradeOnly();
+
+        assertEq(wiped.balanceOf(alice), 0);
+        assertEq(wiped.balanceOf(bob), 0);
+        assertEq(wiped.totalSupply(), 0, "totalSupply zeroed");
+    }
+
+    /// @dev Documents what this change does NOT do: the underlying balance storage is
+    ///      untouched and no Transfer/burn events are emitted, so event-derived
+    ///      indexers still see the legacy balances. Upgrading back proves the state
+    ///      is still fully there.
+    function testUnderlyingStorageIsUntouchedByZeroing() public {
+        wiped = _upgradeOnly();
+        assertEq(wiped.balanceOf(alice), 0);
+        assertEq(wiped.totalSupply(), 0);
+
+        // Upgrade back to a normal ERC20 impl: the original balances reappear intact.
+        SFLUVv2 replacement = new SFLUVv2();
+        vm.prank(gov);
+        wiped.upgradeToAndCall(address(replacement), "");
+
+        SFLUVv2 restored = SFLUVv2(address(wiped));
+        assertEq(restored.balanceOf(alice), 200 ether, "storage never cleared");
+        assertEq(restored.balanceOf(bob), 300 ether, "storage never cleared");
+        assertEq(restored.totalSupply(), 500 ether, "supply never burned");
+    }
+
+    function testZeroingEmitsNoTransferEvents() public {
+        SFLUVBeraWipe impl = new SFLUVBeraWipe();
+        vm.recordLogs();
+        vm.prank(gov);
+        v2.upgradeToAndCall(address(impl), "");
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 transferSig = keccak256("Transfer(address,address,uint256)");
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (logs[i].topics.length > 0) {
+                assertTrue(logs[i].topics[0] != transferSig, "upgrade must emit no Transfer events");
+            }
+        }
     }
 
     function testAllWriteMethodsRevertWithMigrationMessage() public {
