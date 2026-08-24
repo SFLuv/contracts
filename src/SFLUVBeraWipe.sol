@@ -124,6 +124,10 @@ contract SFLUVBeraWipe is ERC20WrapperUpgradeable, AccessControlUpgradeable, UUP
         revert(MIGRATION_MESSAGE);
     }
 
+    function balanceOf(address) public pure override returns (uint256) {
+        return 0;
+    }
+
     // Read-only methods (balanceOf, totalSupply, name, symbol, decimals, allowance,
     // hasRole, etc.) inherit unchanged from the parent contracts so explorers and
     // legacy tools continue to render the historical state.
