@@ -31,7 +31,15 @@ import {SFLUVv3} from "../src/SFLUVv3.sol";
  *     --private-key $DISTRIBUTOR_KEY --broadcast
  */
 contract DistributeBatch is Script {
+    // Reverts unless block.chainid matches EXPECTED_CHAIN_ID when that env var is
+    // set, so a misconfigured RPC can never execute against the wrong chain.
+    function _requireExpectedChain() internal view {
+        uint256 expected = vm.envOr("EXPECTED_CHAIN_ID", uint256(0));
+        require(expected == 0 || block.chainid == expected, "EXPECTED_CHAIN_ID mismatch: wrong chain");
+    }
+
     function run(string memory jsonPath) public {
+        _requireExpectedChain();
         address v3 = vm.envAddress("SFLUV_V3_PROXY");
         address distributor = vm.envAddress("DISTRIBUTOR");
         SFLUVv3 sfluv = SFLUVv3(v3);

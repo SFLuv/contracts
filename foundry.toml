@@ -7,4 +7,11 @@ ast = true
 build_info = true
 extra_output = ["storageLayout"]
 
+# Allow the migration scripts (DeploySmartWalletBatch, DistributeBatch, ...) to
+# read/write their JSON I/O under the migration-tooling tree. "../../" is the
+# repo root relative to this contracts project (repos/contracts). The migrator
+# and run-migration.sh keep their artifacts there; point MIGRATION_ARTIFACT_ROOT
+# inside this tree (the default) or broaden this path if you relocate artifacts.
+fs_permissions = [{ access = "read-write", path = "../../" }]
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

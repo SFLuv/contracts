@@ -13,7 +13,15 @@ import {SFLUVBeraWipe} from "../src/SFLUVBeraWipe.sol";
  *   SFLUV_V2_PROXY = Berachain SFLUV proxy
  */
 contract UpgradeToBeraWipe is Script {
+    // Reverts unless block.chainid matches EXPECTED_CHAIN_ID when that env var is
+    // set, so a misconfigured RPC can never execute against the wrong chain.
+    function _requireExpectedChain() internal view {
+        uint256 expected = vm.envOr("EXPECTED_CHAIN_ID", uint256(0));
+        require(expected == 0 || block.chainid == expected, "EXPECTED_CHAIN_ID mismatch: wrong chain");
+    }
+
     function run() public {
+        _requireExpectedChain();
         address proxyAddr = vm.envAddress("SFLUV_V2_PROXY");
 
         vm.startBroadcast();
