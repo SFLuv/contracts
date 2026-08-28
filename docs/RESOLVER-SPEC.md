@@ -8,6 +8,10 @@ Implemented in `src/signet/`, tested in `test/SignetAuthResolver.t.sol`,
 `test/SafeBindingRegistry.t.sol` and (against live Celo)
 `test/SignetAuthResolverForkCelo.t.sol`.
 
+This document is the design and the reasoning. To deploy and integrate it, work
+from [RESOLVER-HANDOFF.md](./RESOLVER-HANDOFF.md) instead — node config, client
+request shapes, error causes, and who does what in which order.
+
 ---
 
 ## What changed from the first draft
@@ -205,6 +209,9 @@ delegate carries the policy on its own.
 ---
 
 ## Deployment
+
+Summarised here; the step-by-step, with verification commands and the node-side
+prerequisites, is in [RESOLVER-HANDOFF.md](./RESOLVER-HANDOFF.md).
 
 ```bash
 EXPECTED_CHAIN_ID=42220 GATE_OWNER=<sfluv multisig> GATE_ALLOW_ALL=false \
