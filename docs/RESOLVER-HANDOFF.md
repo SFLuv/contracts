@@ -166,9 +166,49 @@ Celo produces **1-second blocks**, so this is roughly a **30-second window**.
 Fetch `(number, hash)` immediately before the request and retry on a staleness
 error rather than caching it. **The client needs its own Celo RPC** for this.
 
+### One node, not all of them
+
+Nodes are symmetric. `/v1/auth` broadcasts a `msgAuth` coord message to the
+participants, and each one independently re-runs the SIWE recovery and the
+resolver read at the pinned block rather than trusting the initiator's verdict
+(`handlers.go`, `coord.go`). All four auth schemes work this way. Because every
+node reads at the same pinned block, no two of them can reach *conflicting*
+verdicts.
+
+What can differ is whether a node reaches a verdict at all. A participant that
+cannot do the resolver read NACKs and never caches the session — no
+`chain_rpcs` entry, an RPC lagging behind the pin, a hash it does not see as
+canonical, or its own head far enough ahead that the 30-block window has
+closed. So propagation can be partial, and it is silent: the client already has
+its `200` from the initiator.
+
+The broadcast is **asynchronous**, so `/v1/auth` returns before the
+participants have cached the session. Authenticating and then immediately
+signing against a *different* node can lose that race. Either retry the sign
+once on a 401, or call the other nodes as a barrier.
+
+A 401 from a participant has three causes that look identical from outside, and
+they need different fixes:
+
+| Cause | Fix |
+|---|---|
+| It has not processed the broadcast yet | retry the sign |
+| It was unreachable when the broadcast went out | **re-auth** — there is no backfill; a participant that missed `msgAuth` never learns the session, it just NACKs (`coord.go`), and `handlers.go` says the recovery is for the client to re-auth |
+| It cannot reach Celo at all | neither — that node is out until step B is fixed on it |
+
+Note the protocol harness calls every node, and says why: a cheap barrier that
+keeps propagation noise out of its measurements, not a requirement. The SDK's
+`bootstrap.ts` fans out too, and its comment explains the same thing — but its
+opening line reads as a requirement, which is the natural way to conclude
+fan-out is needed. It isn't.
+
+This path has a wider window than the other schemes: each participant makes its
+own `eth_call` at the pinned block, so propagation is bounded by every node's
+RPC latency to Celo.
+
 ### The request
 
-`POST /v1/auth` **to every node**:
+`POST /v1/auth` **to one node**:
 
 ```jsonc
 {
@@ -270,7 +310,7 @@ wallet the user considers primary; `users.smart_index` identifies which one.
 1. Generate a session keypair; take the 33-byte compressed pubkey.
 2. Build the SIWE message (§C) and have the Privy EOA sign it.
 3. Fetch a fresh Celo `(block_number, block_hash)`.
-4. `POST /v1/auth` to every node.
+4. `POST /v1/auth` to one node.
 5. On `too stale`, refetch the block and retry — do not cache the pin.
 
 ### What the app should expect
