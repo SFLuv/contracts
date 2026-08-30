@@ -23,7 +23,7 @@ address. Identity follows the wallet, not the login provider.
 
 | # | Work | Owner | Blocks |
 |---|---|---|---|
-| A | ~~Deploy the three contracts on Celo~~ — **done**; staff allowlist still to be set | SFLuv | D |
+| A | ~~Deploy the three contracts on Celo~~ — **done**, sources verified; staff allowlist still to be set | SFLuv | D |
 | B | Node config on all six nodes | OLL (4 nodes) + SFLuv (2 nodes) | D |
 | C | Client support for the `onchain_resolver` scheme — **does not exist in the SDK today** | OLL (SDK) or SFLuv (app) | E |
 | D | Bind the resolver to the group (manager, timelocked) | SFLuv (group manager) | E |
@@ -83,6 +83,42 @@ Identify contracts by their **getters, not by a pasted deploy log** — `forge`'
 printed summary transposed the registry and gate names on this deploy, though
 its `run-latest.json` was correct. The gate answers `owner()`; the registry
 answers `safeFor()`.
+
+### Source verification — done
+
+All three are verified on Celoscan, so the resolver's logic can be read
+alongside this document rather than taken on trust. The invocations, for
+re-verification or for a redeploy elsewhere:
+
+```bash
+export ETHERSCAN_API_KEY=<key>   # Etherscan V2: one key covers Celo
+
+# Registry first — no constructor args
+forge verify-contract 0xAa42790F463DDCBfDC808275589222A61CeCCD85 \
+  src/signet/SafeBindingRegistry.sol:SafeBindingRegistry \
+  --chain 42220 --watch
+
+# Gate — (owner, allowAll=false, allowlist=[])
+forge verify-contract 0x78B405B629e7c27F81d7dF3dCEcC097f58B47053 \
+  src/signet/SFLuvAuthGate.sol:SFLuvAuthGate \
+  --chain 42220 --watch \
+  --constructor-args 0x000000000000000000000000762f96819a7705448843e96d63d638ec2f39403b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000
+
+# Resolver last — (registry, gate), the order the constructor declares
+forge verify-contract 0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3 \
+  src/signet/SignetAuthResolver.sol:SignetAuthResolver \
+  --chain 42220 --watch \
+  --constructor-args 0x000000000000000000000000aa42790f463ddcbfdc808275589222a61ceccd8500000000000000000000000078b405b629e7c27f81d7df3dcecc097f58b47053
+```
+
+Order matters only for readability: verifying the resolver first would leave its
+`REGISTRY()`/`GATE()` pointing at unverified addresses, which is the same
+confusion the transposed deploy log already caused once.
+
+Compiler settings come from `foundry.toml` — solc 0.8.35, **optimizer off**. The
+build targets `evmVersion: osaka`; if a future toolchain or verifier does not
+offer it, pin `--evm-version prague` (or `cancun`). None of these contracts use
+post-Cancun opcodes, so the bytecode is unchanged by that choice.
 
 ---
 
@@ -371,9 +407,9 @@ Found while implementing; none blocks deployment, all three are worth filing.
 | Signet group | Ethereum mainnet | `0x86fe28144034fdaf86d3c964296dd33e4b94ac59` |
 | Citizen Wallet account factory | Celo | `0x7cC54D54bBFc65d1f0af7ACee5e4042654AF8185` |
 | CommunityModule | Celo | `0x7079253c0358eF9Fd87E16488299Ef6e06F403B6` |
-| `SignetAuthResolver` | Celo | `0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3` |
-| `SafeBindingRegistry` | Celo | `0xAa42790F463DDCBfDC808275589222A61CeCCD85` |
-| `SFLuvAuthGate` | Celo | `0x78B405B629e7c27F81d7dF3dCEcC097f58B47053` |
+| `SignetAuthResolver` | Celo | [`0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3`](https://celoscan.io/address/0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3#code) |
+| `SafeBindingRegistry` | Celo | [`0xAa42790F463DDCBfDC808275589222A61CeCCD85`](https://celoscan.io/address/0xAa42790F463DDCBfDC808275589222A61CeCCD85#code) |
+| `SFLuvAuthGate` | Celo | [`0x78B405B629e7c27F81d7dF3dCEcC097f58B47053`](https://celoscan.io/address/0x78B405B629e7c27F81d7dF3dCEcC097f58B47053#code) |
 | Gate owner / group manager | Celo + mainnet | `0x762F96819a7705448843E96D63D638Ec2f39403B` |
 
 Deployed 2026-08-30 at Celo block **76208199**, from `0xcD44c7b9AeA6b90375a3888C02F70618d3387379` at nonces 0-2. The resolver address is half of
