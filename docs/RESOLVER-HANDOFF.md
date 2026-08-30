@@ -23,7 +23,7 @@ address. Identity follows the wallet, not the login provider.
 
 | # | Work | Owner | Blocks |
 |---|---|---|---|
-| A | Deploy the three contracts on Celo | SFLuv | D |
+| A | ~~Deploy the three contracts on Celo~~ — **done**; staff allowlist still to be set | SFLuv | D |
 | B | Node config on all six nodes | OLL (4 nodes) + SFLuv (2 nodes) | D |
 | C | Client support for the `onchain_resolver` scheme — **does not exist in the SDK today** | OLL (SDK) or SFLuv (app) | E |
 | D | Bind the resolver to the group (manager, timelocked) | SFLuv (group manager) | E |
@@ -34,40 +34,54 @@ moment the binding executes, any node without Celo RPC starts failing auth.
 
 ---
 
-## A. Deploy the contracts (SFLuv, Celo)
+## A. Deploy the contracts (SFLuv, Celo) — ✅ DONE 2026-08-30
+
+Deployed at Celo block **76208199** by an ops key that retains no authority;
+addresses are in [Reference](#addresses). The gate is owned by the group manager
+`0x762F…403B` and is **closed** (`allowAll=false`, empty allowlist, no
+delegate), so `resolve()` returns `(false, 0x0)` for everyone. Nothing is live
+until step D. Kept here for the record and for re-deploying to a test network:
 
 ```bash
 EXPECTED_CHAIN_ID=42220 \
-GATE_OWNER=<SFLuv multisig> \
+GATE_OWNER=0x762F96819a7705448843E96D63D638Ec2f39403B \
 GATE_ALLOW_ALL=false \
 forge script script/DeploySignetResolver.s.sol:DeploySignetResolver \
   --rpc-url https://forno.celo.org --private-key $PRIVATE_KEY --broadcast
 ```
 
-`GATE_ALLOW_ALL=false` starts closed, which is the decision recorded in the
-spec: the trial is gated to staff. Allowlist them in one batch afterwards:
+**Remaining in this workstream: allowlist the staff.** `GATE_ALLOW_ALL=false` is
+the decision recorded in the spec — the trial is gated to staff — and until this
+runs, nobody can authenticate. One batch, signed by the group manager key:
 
 ```bash
-cast send <gate> "setAllowlisted(address[],bool)" "[<eoa1>,<eoa2>,…]" true \
+cast send 0x78B405B629e7c27F81d7dF3dCEcC097f58B47053 \
+  "setAllowlisted(address[],bool)" "[<eoa1>,<eoa2>,…]" true \
   --rpc-url https://forno.celo.org --private-key $GATE_OWNER_KEY
 ```
 
-Allowlist the **owner EOAs** (the Privy addresses that sign SIWE), not the Safes.
+Allowlist the **owner EOAs** (the Privy addresses that sign SIWE), not the
+Safes. The manager key has never transacted on Celo — fund it with ~1 CELO
+first; a batch costs roughly 0.03 CELO at current gas.
 
-**Verify before going further.** The first check is the one that fails auth
-network-wide if it is wrong, because Signet's accept-list is a protocol constant:
+**Verification (run and recorded at deploy).** The first check is the one that
+fails auth network-wide if it is wrong, because Signet's accept-list is a
+protocol constant:
 
 ```bash
-cast call <resolver> "typeAndVersion()(string)"    --rpc-url https://forno.celo.org
+R=https://forno.celo.org
+RES=0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3
+cast call $RES "typeAndVersion()(string)" --rpc-url $R
 # → "SignetAuthResolver 1.0.0"   (exactly; anything else is rejected by every node)
-cast call <resolver> "REGISTRY()(address)"         --rpc-url https://forno.celo.org
-cast call <resolver> "GATE()(address)"             --rpc-url https://forno.celo.org
-cast call <resolver> "resolve(address)(bool,bytes32)" <unbound eoa> --rpc-url https://forno.celo.org
-# → false, 0x0…0   (nothing resolves until it is bound — this is expected)
+cast call $RES "REGISTRY()(address)"      --rpc-url $R   # → 0xAa42…CD85
+cast call $RES "GATE()(address)"          --rpc-url $R   # → 0x78B4…7053
+cast call $RES "resolve(address)(bool,bytes32)" <unbound eoa> --rpc-url $R
+# → false, 0x0…0   (nothing resolves until allowlisted *and* bound — expected)
 ```
 
-**Record the three addresses.** The resolver address is half of every Signet key
-id and can never change without orphaning every key issued under it.
+Identify contracts by their **getters, not by deploy-log labels** — `forge`'s
+broadcast summary transposed the registry and gate names on this deploy. The
+gate answers `owner()`; the registry answers `safeFor()`.
 
 ---
 
@@ -257,9 +271,11 @@ Group manager only, on the group's chain (**Ethereum mainnet**), group
 `0x86fe28144034fdaf86d3c964296dd33e4b94ac59`:
 
 ```bash
-cast send <group> "queueAuthResolver(uint64,address,bool)" 42220 <resolver> true --rpc-url $ETH_RPC …
+GROUP=0x86fe28144034fdaf86d3c964296dd33e4b94ac59
+RESOLVER=0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3
+cast send $GROUP "queueAuthResolver(uint64,address,bool)" 42220 $RESOLVER true --rpc-url $ETH_RPC …
 # wait removalDelay — 600 s on the live group
-cast send <group> "executeAuthResolver()" --rpc-url $ETH_RPC …
+cast send $GROUP "executeAuthResolver()" --rpc-url $ETH_RPC …
 ```
 
 `requireCanonicalSubject = true`: with it false, a zero subject would fall back
@@ -270,8 +286,8 @@ success, so it is defence in depth — set it anyway.
 Check the queue and the result:
 
 ```bash
-cast call <group> "getPendingAuthResolver()((uint256,(uint64,address,bool),address))" --rpc-url $ETH_RPC
-cast call <group> "getAuthResolver()((uint64,address,bool))"                          --rpc-url $ETH_RPC
+cast call $GROUP "getPendingAuthResolver()((uint256,(uint64,address,bool),address))" --rpc-url $ETH_RPC
+cast call $GROUP "getAuthResolver()((uint64,address,bool))"                          --rpc-url $ETH_RPC
 ```
 
 No restart is needed for the binding itself: `AuthResolverSet` is a watched
@@ -354,9 +370,32 @@ Found while implementing; none blocks deployment, all three are worth filing.
 | Signet group | Ethereum mainnet | `0x86fe28144034fdaf86d3c964296dd33e4b94ac59` |
 | Citizen Wallet account factory | Celo | `0x7cC54D54bBFc65d1f0af7ACee5e4042654AF8185` |
 | CommunityModule | Celo | `0x7079253c0358eF9Fd87E16488299Ef6e06F403B6` |
-| `SignetAuthResolver` | Celo | _fill in at deploy_ |
-| `SafeBindingRegistry` | Celo | _fill in at deploy_ |
-| `SFLuvAuthGate` | Celo | _fill in at deploy_ |
+| `SignetAuthResolver` | Celo | `0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3` |
+| `SafeBindingRegistry` | Celo | `0xAa42790F463DDCBfDC808275589222A61CeCCD85` |
+| `SFLuvAuthGate` | Celo | `0x78B405B629e7c27F81d7dF3dCEcC097f58B47053` |
+| Gate owner / group manager | Celo + mainnet | `0x762F96819a7705448843E96D63D638Ec2f39403B` |
+
+Deployed 2026-08-30 at Celo block **76208199**. The resolver address is half of
+every Signet key id and can never change without orphaning keys.
+
+> **The names in `forge script`'s broadcast summary were transposed** between
+> the registry and the gate. The table above is the on-chain truth, confirmed by
+> method probing: `0x78B4…7053` answers `owner()`/`allowAll()`/`delegate()` and
+> is the gate; `0xAa42…CD85` answers `safeFor()` and is the registry. The
+> resolver's own `REGISTRY()`/`GATE()` getters agree, so the deployment is
+> correctly wired — only the log labels were wrong. Trust the getters.
+
+Deployment state at hand-off — closed and inert, nothing resolves yet:
+
+```
+typeAndVersion()  "SignetAuthResolver 1.0.0"   exact accept-list match
+REGISTRY()        0xAa42790F463DDCBfDC808275589222A61CeCCD85
+GATE()            0x78B405B629e7c27F81d7dF3dCEcC097f58B47053
+gate owner()      0x762F96819a7705448843E96D63D638Ec2f39403B
+gate pendingOwner() / delegate()   0x0
+gate allowAll()   false
+resolve(anyone)   (false, 0x0)
+```
 
 ### Contract surface
 
