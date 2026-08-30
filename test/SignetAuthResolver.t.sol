@@ -59,7 +59,7 @@ contract SignetAuthResolverTest is Test {
 
     function test_resolve_boundOwner() public {
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (bool ok, bytes32 subject) = resolver.resolve(alice);
         assertTrue(ok);
@@ -71,11 +71,11 @@ contract SignetAuthResolverTest is Test {
     /// principal rather than one-per-login.
     function test_resolve_twoOwnersConvergeOnOneSubject() public {
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         aliceSafe.setOwner(aliceSecondDevice, true);
         vm.prank(aliceSecondDevice);
-        registry.bind(aliceSecondDevice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (bool ok1, bytes32 s1) = resolver.resolve(alice);
         (bool ok2, bytes32 s2) = resolver.resolve(aliceSecondDevice);
@@ -88,10 +88,10 @@ contract SignetAuthResolverTest is Test {
     /// created it is removed, and the removed credential stops authenticating.
     function test_resolve_survivesOwnerRotation() public {
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
         aliceSafe.setOwner(aliceSecondDevice, true);
         vm.prank(aliceSecondDevice);
-        registry.bind(aliceSecondDevice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         aliceSafe.setOwner(alice, false);
 
@@ -188,7 +188,7 @@ contract SignetAuthResolverTest is Test {
 
     function test_resolve_neverRevertsOnHostileGate() public {
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         address[4] memory gates = [
             address(new RevertingCallee()),
@@ -253,10 +253,10 @@ contract SignetAuthResolverTest is Test {
         SignetAuthResolver gated = new SignetAuthResolver(registry, gate);
 
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
         aliceSafe.setOwner(bob, true);
         vm.prank(bob);
-        registry.bind(bob, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (bool aliceOk,) = gated.resolve(alice);
         (bool bobOk,) = gated.resolve(bob);
@@ -271,7 +271,7 @@ contract SignetAuthResolverTest is Test {
     function test_gate_deniesEveryoneWhenClosed() public {
         SignetAuthResolver gated = new SignetAuthResolver(registry, new DenyAllGate());
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (bool ok,) = gated.resolve(alice);
         assertFalse(ok);
@@ -284,7 +284,7 @@ contract SignetAuthResolverTest is Test {
         SignetAuthResolver gated = new SignetAuthResolver(registry, gate);
 
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (, bytes32 gatedSubject) = gated.resolve(alice);
         (, bytes32 openSubject) = resolver.resolve(alice);
@@ -300,7 +300,7 @@ contract SignetAuthResolverTest is Test {
         SignetAuthResolver gated = new SignetAuthResolver(registry, gate);
 
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         (bool ok,) = gated.resolve(alice);
         assertFalse(ok, "empty allowlist, no delegate: nobody gets in");
@@ -325,7 +325,7 @@ contract SignetAuthResolverTest is Test {
         SignetAuthResolver gated = new SignetAuthResolver(registry, gate);
 
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
 
         // A delegate that denies everyone, and a Safe with no module either way.
         gate.setDelegate(new ModuleMembershipGate(registry, makeAddr("someModule")));
@@ -350,10 +350,10 @@ contract SignetAuthResolverTest is Test {
 
             if (i == 0) {
                 vm.prank(alice);
-                registry.bind(alice, address(aliceSafe));
+                registry.bind(address(aliceSafe));
                 aliceSafe.setOwner(bob, true);
                 vm.prank(bob);
-                registry.bind(bob, address(aliceSafe));
+                registry.bind(address(aliceSafe));
             }
 
             (bool aliceOk,) = gated.resolve(alice);
@@ -370,7 +370,7 @@ contract SignetAuthResolverTest is Test {
 
         address module = makeAddr("communityModule");
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
         aliceSafe.setModule(module, true);
         gate.setDelegate(new ModuleMembershipGate(registry, module));
 
@@ -397,7 +397,7 @@ contract SignetAuthResolverTest is Test {
 
         address module = makeAddr("communityModule");
         vm.prank(alice);
-        registry.bind(alice, address(aliceSafe));
+        registry.bind(address(aliceSafe));
         aliceSafe.setModule(module, true);
         gate.setDelegate(new ModuleMembershipGate(registry, module));
 

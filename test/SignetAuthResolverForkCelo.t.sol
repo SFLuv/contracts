@@ -75,9 +75,11 @@ contract SignetAuthResolverForkCeloTest is Test {
         (bool ok,) = resolver.resolve(OWNER_EOA);
         assertFalse(ok, "unbound account must not authenticate");
 
-        // The production path: the Safe binds its own owner.
-        vm.prank(PRIMARY_SAFE);
-        registry.bind(OWNER_EOA, PRIMARY_SAFE);
+        // The production path: the owner binds itself to its wallet. Only the
+        // account can authorise this — a Safe vouching for its own owner is
+        // circular, and was the hole in the first version of the registry.
+        vm.prank(OWNER_EOA);
+        registry.bind(PRIMARY_SAFE);
 
         bytes32 subject;
         (ok, subject) = resolver.resolve(OWNER_EOA);
@@ -95,8 +97,8 @@ contract SignetAuthResolverForkCeloTest is Test {
         SignetAuthResolver resolver = new SignetAuthResolver(registry, gate);
         gate.setDelegate(new ModuleMembershipGate(registry, COMMUNITY_MODULE));
 
-        vm.prank(PRIMARY_SAFE);
-        registry.bind(OWNER_EOA, PRIMARY_SAFE);
+        vm.prank(OWNER_EOA);
+        registry.bind(PRIMARY_SAFE);
 
         uint256 before = gasleft();
         (bool ok, bytes32 subject) = resolver.resolve(OWNER_EOA);
@@ -113,7 +115,7 @@ contract SignetAuthResolverForkCeloTest is Test {
         address outsider = makeAddr("outsider");
         MockSafe foreignSafe = new MockSafe(outsider);
         vm.prank(outsider);
-        registry.bind(outsider, address(foreignSafe));
+        registry.bind(address(foreignSafe));
 
         (bool outsiderOk,) = resolver.resolve(outsider);
         assertFalse(outsiderOk, "a Safe without the community module is not a member");

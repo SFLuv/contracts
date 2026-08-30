@@ -123,20 +123,37 @@ that.)
 **Why the registry cannot grant identity.** It only nominates. `isOwner` is
 re-checked on every `resolve`, so the worst a wrong entry can do is deny service
 or point an account at another Safe *that account also owns*. It can never hand
-one person's subject to another. `test_resolve_registryCannotGrantIdentity`
+one person's subject to another.
+
+That argument holds only while the entry names a Safe the account genuinely
+owns — which is a property of who may *write* the entry, not of the read path.
+The re-check defends against a lying registry; it cannot defend against a
+binding that names a contract the attacker wrote, because the re-check then asks
+the attacker. See the write-authorization bullet below. `test_resolve_registryCannotGrantIdentity`
 holds this down.
 
 The draft used that property to argue the registry could be upgradeable and
 trusted. It does not need to be either:
 
-- **Self-authorizing.** `bind(account, safe)` is callable only by `account`
-  itself or by `safe` itself. No owner, no roles, no admin — nothing to
-  compromise, and no third party can front-run a permanent binding onto someone
-  else's account.
+- **Authorized by the account, and only the account.** `bind(safe)` binds
+  `msg.sender`; `bindWithSignature` accepts a relayed write carrying the
+  account's EIP-712 signature, so enrolment can be gasless without introducing
+  a writer. No owner, no roles, no admin — nothing to compromise, and no third
+  party can write a binding for an address it does not control.
+
+  The first deployment also accepted `msg.sender == safe`, reasoning that a
+  wallet vouching for its own owner is self-authorizing. **That was wrong, and
+  it was exploitable**: the caller chooses which contract plays the part of the
+  Safe, and `isOwner` is then answered by that same contract. Anyone could pin
+  any unbound EOA to an address of their choosing, permanently. The lesson is
+  narrow and worth keeping: asking the nominated Safe to vouch for the binding
+  is circular, because the nomination is the thing under attack.
 - **Validated on write** (`isOwner` must already hold) *and* on read.
-- **Write-once.** A bound account can never be re-pointed. Moving a binding
-  would move a live key namespace, which is the hijack R-1 exists to prevent.
-  Write-once is what makes it safe for the registry to be open and unowned.
+- **Re-bindable by the account alone.** Re-pointing moves the namespace the
+  account's future sessions land in, so it is a deliberate identity move rather
+  than a correction — but forbidding it outright made a mistaken binding
+  permanent in a contract that cannot be upgraded. Rebinding grants no reach:
+  landing on a Safe still requires already being one of its owners.
 
 Losing a credential is handled by the owner set, not by rewriting history: add
 the new EOA as a Safe owner, bind it to the **same** Safe, and it resolves to the

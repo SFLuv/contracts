@@ -14,7 +14,7 @@ address. Identity follows the wallet, not the login provider.
 | Contract | Mutable? | Role |
 |---|---|---|
 | `SignetAuthResolver` | **immutable, ownerless** | What Signet calls. Reads the registry, verifies with the Safe, returns the subject. |
-| `SafeBindingRegistry` | **immutable**, permissionless, write-once | Records account → Safe. Self-authorizing; no admin. |
+| `SafeBindingRegistry` | **immutable**, permissionless | Records account → Safe. Every write authorised by the account itself; no admin. |
 | `SFLuvAuthGate` | mutable, owned by SFLuv | Admission policy. Can only deny. |
 
 ---
@@ -23,7 +23,7 @@ address. Identity follows the wallet, not the login provider.
 
 | # | Work | Owner | Blocks |
 |---|---|---|---|
-| A | ~~Deploy the three contracts on Celo~~ — **done**, sources verified; staff allowlist still to be set | SFLuv | D |
+| A | Deploy on Celo — first attempt **superseded**, see below; registry + resolver must be redeployed | SFLuv | D |
 | B | Node config on all six nodes | OLL (4 nodes) + SFLuv (2 nodes) | D |
 | C | Client support for the `onchain_resolver` scheme — **does not exist in the SDK today** | OLL (SDK) or SFLuv (app) | E |
 | D | Bind the resolver to the group (manager, timelocked) | SFLuv (group manager) | E |
@@ -34,21 +34,71 @@ moment the binding executes, any node without Celo RPC starts failing auth.
 
 ---
 
-## A. Deploy the contracts (SFLuv, Celo) — ✅ DONE 2026-08-30
+## A. Deploy the contracts (SFLuv, Celo) — ⚠️ REDEPLOY REQUIRED
 
-Deployed at Celo block **76208199** by an ops key that retains no authority;
-addresses are in [Reference](#addresses). The gate is owned by the group manager
-`0x762F…403B` and is **closed** (`allowAll=false`, empty allowlist, no
-delegate), so `resolve()` returns `(false, 0x0)` for everyone. Nothing is live
-until step D. Kept here for the record and for re-deploying to a test network:
+The first deployment (Celo block 76208199) shipped a registry with a
+**squatting vulnerability**. It was found before anything was bound, so the fix
+costs only gas — but the registry and resolver must be replaced before any
+account binds or step D executes.
+
+### The squatting vulnerability
+
+The retired registry authorised a write from either the account or *the Safe it
+names*, then asked that same Safe whether it owned the account:
+
+```solidity
+if (msg.sender != account && msg.sender != safe) revert NotSelfAuthorized(msg.sender);
+...
+if (!ISafe(safe).isOwner(account)) revert NotAnOwner(account, safe);
+```
+
+Both halves are chosen by the caller. Anyone could deploy a contract whose
+`isOwner` returns `true` for everybody, call `bind(victimEOA, thatContract)`
+from it, and permanently pin any unbound EOA to an address of their choosing —
+for the cost of one transaction, against any address they could read off the
+chain. The victim would then authenticate successfully, but under a subject the
+attacker picked rather than their own Safe; and because that registry was also
+write-once, they could never correct it.
+
+The live `isOwner` re-check in the resolver does **not** cover this. It defends
+against a lying *registry*, but here the attacker supplies the contract playing
+the part of the Safe, so the check interrogates the attacker. "The registry
+nominates, the Safe decides" holds only when the Safe is not the attacker's
+choice. Requiring a *genuine* Safe would not have fixed it either — Safe lets
+an owner add any address without its consent, so the same attack runs through a
+real wallet.
+
+Both behaviours are now permanent regression tests in
+`test/SafeBindingRegistry.t.sol`.
+
+### What changed
+
+| | Retired | Replacement |
+|---|---|---|
+| Who may write a binding | the account **or the named Safe** | the account only — directly, or by EIP-712 signature it produced |
+| Gasless enrolment | Safe relays via CommunityModule | any relayer submits `bindWithSignature` |
+| Correcting a wrong binding | impossible, write-once | the account may rebind |
+| Replay protection | n/a | per-account nonce + deadline + EIP-712 domain |
+
+`SignetAuthResolver` is unchanged in behaviour, but it holds the registry
+address as an immutable, so a new registry means a new resolver.
+**`SFLuvAuthGate` is not affected and is reused as-is**, keeping its owner and
+the staff allowlist already written to it.
+
+### The redeploy
 
 ```bash
 EXPECTED_CHAIN_ID=42220 \
-GATE_OWNER=0x762F96819a7705448843E96D63D638Ec2f39403B \
-GATE_ALLOW_ALL=false \
+GATE_ADDRESS=0x78B405B629e7c27F81d7dF3dCEcC097f58B47053 \
 forge script script/DeploySignetResolver.s.sol:DeploySignetResolver \
   --rpc-url https://forno.celo.org --private-key $PRIVATE_KEY --broadcast
 ```
+
+`GATE_ADDRESS` reuses the deployed gate rather than making a new one; the script
+asserts it has code, and asserts the resolver's `REGISTRY()`/`GATE()` match what
+was just deployed. Two transactions, roughly 0.3–0.9 CELO depending on gas.
+
+Retired, do not use: registry `0xAa42790F…CD85`, resolver `0x0571e773…6ce3`.
 
 **Remaining in this workstream: allowlist the staff.** `GATE_ALLOW_ALL=false` is
 the decision recorded in the spec — the trial is gated to staff — and until this
@@ -342,21 +392,43 @@ unbinding strands them — treat this as a one-way door, not a rollback.
 
 ### One-time: bind the wallet
 
-Nothing resolves until an account is bound. `bind` is callable **only by the
-account itself or by the Safe it names** — there is no admin path, so SFLuv
-cannot prefill bindings from the database. The natural route is a sponsored user
-operation from the Safe through the CommunityModule, the same rail the wallet
-already uses, which makes it invisible and gasless for the user:
+Nothing resolves until an account is bound. Every binding is authorised by the
+**account itself** — there is no admin path, and no path by which anyone else
+writes a binding for an address they do not control, so SFLuv cannot prefill
+bindings from the database. Two ways in:
 
-```bash
-cast calldata "bind(address,address)" <ownerEOA> <safe>
-# → execTransactionFromModule(registry, 0, <calldata>, 0) via the CommunityModule
+```solidity
+// The owner EOA sends the transaction itself. Needs CELO for gas.
+bind(address safe)
+
+// Anyone relays it; the account's signature is the authority. Gasless for
+// the user, which is the production path — Privy EOAs hold no CELO.
+bindWithSignature(address account, address safe, uint256 deadline, bytes signature)
 ```
 
-Requirements at bind time: `isOwner(account)` must already hold, and neither
-address may be zero. It is **write-once** — a bound account can never be
-re-pointed, because moving a binding would move a live key namespace. Bind the
-wallet the user considers primary; `users.smart_index` identifies which one.
+The signature is EIP-712 over `Bind(address account,address safe,uint256 nonce,
+uint256 deadline)`, signed by `account`. The domain is
+`{name: "SFLuvSafeBindingRegistry", version: "1", chainId: 42220,
+verifyingContract: <registry>}`, so a signature cannot be replayed against
+another chain or another deployment of the registry. Read the current nonce from
+`nonces(account)`; it increments on every successful signed bind. ERC-1271
+signers are accepted.
+
+Requirements at bind time: `isOwner(account)` must already hold on the named
+Safe, and `safe` may not be zero or codeless. Bind the wallet the user considers
+primary; `users.smart_index` identifies which one.
+
+**Rebinding is allowed, by the account alone.** Re-pointing changes the subject
+the account's *future* sessions land under, so keys minted under the old subject
+stay addressable only there — treat it as a deliberate identity move, not a
+routine correction. It exists so that binding the wrong Safe is recoverable
+rather than permanent.
+
+> **Do not route this through the Safe.** An earlier version of the registry
+> also accepted `msg.sender == safe`, on the reasoning that a wallet vouching
+> for its own owner is self-authorising. It is not — the caller chooses which
+> contract plays the part of the Safe, and `isOwner` is then answered by that
+> same contract. See *The squatting vulnerability* under workstream A.
 
 ### Every login
 
@@ -439,8 +511,10 @@ resolve(anyone)   (false, 0x0)
 ### Contract surface
 
 ```solidity
-// SafeBindingRegistry — permissionless, write-once
-function bind(address account, address safe) external;   // caller must be account or safe
+// SafeBindingRegistry — permissionless; every write authorised by the account
+function bind(address safe) external;                    // caller is the account
+function bindWithSignature(address account, address safe, uint256 deadline, bytes signature) external;
+function nonces(address account) external view returns (uint256);
 function safeFor(address account) external view returns (address);
 
 // SignetAuthResolver — immutable, ownerless

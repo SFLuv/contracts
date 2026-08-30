@@ -18,10 +18,14 @@ import {SignetAuthResolver} from "../src/signet/SignetAuthResolver.sol";
  *
  * Env:
  *   EXPECTED_CHAIN_ID   guard; 42220 for Celo mainnet
- *   GATE_OWNER          owner of the gate (SFLuv multisig). Omit to deploy with
- *                       no gate at all — permanent, so prefer a gate set to
- *                       allowAll over no gate.
- *   GATE_ALLOW_ALL      start the gate open (default false)
+ *   GATE_ADDRESS        reuse an already-deployed gate, keeping its owner and
+ *                       its allowlist. Takes precedence over GATE_OWNER, and is
+ *                       the right flag when replacing the registry/resolver
+ *                       pair without disturbing admission.
+ *   GATE_OWNER          owner of a freshly deployed gate. Omit both this and
+ *                       GATE_ADDRESS to deploy with no gate at all — permanent,
+ *                       so prefer a gate set to allowAll over no gate.
+ *   GATE_ALLOW_ALL      start a freshly deployed gate open (default false)
  *
  * Run:
  *   forge script script/DeploySignetResolver.s.sol:DeploySignetResolver \
@@ -32,21 +36,30 @@ contract DeploySignetResolver is Script {
         uint256 expected = vm.envOr("EXPECTED_CHAIN_ID", uint256(0));
         require(expected == 0 || block.chainid == expected, "EXPECTED_CHAIN_ID mismatch: wrong chain");
 
+        address existingGate = vm.envOr("GATE_ADDRESS", address(0));
         address gateOwner = vm.envOr("GATE_OWNER", address(0));
         bool gateAllowAll = vm.envOr("GATE_ALLOW_ALL", false);
+
+        require(existingGate == address(0) || existingGate.code.length > 0, "GATE_ADDRESS has no code");
 
         vm.startBroadcast();
 
         SafeBindingRegistry registry = new SafeBindingRegistry();
 
-        IAuthGate gate = IAuthGate(address(0));
-        if (gateOwner != address(0)) {
+        IAuthGate gate = IAuthGate(existingGate);
+        bool reusedGate = existingGate != address(0);
+        if (!reusedGate && gateOwner != address(0)) {
             gate = new SFLuvAuthGate(gateOwner, gateAllowAll, new address[](0));
         }
 
         SignetAuthResolver resolver = new SignetAuthResolver(registry, gate);
 
         vm.stopBroadcast();
+
+        // The resolver reads the registry through this exact pair; a mismatch
+        // here is the one wiring error that survives to production silently.
+        require(address(resolver.REGISTRY()) == address(registry), "resolver/registry mismatch");
+        require(address(resolver.GATE()) == address(gate), "resolver/gate mismatch");
 
         require(
             keccak256(bytes(resolver.typeAndVersion())) == keccak256("SignetAuthResolver 1.0.0"),
@@ -55,8 +68,10 @@ contract DeploySignetResolver is Script {
 
         console.log("chainId:  ", block.chainid);
         console.log("registry: ", address(registry));
-        console.log("gate:     ", address(gate));
+        console.log("gate:     ", address(gate), reusedGate ? "(reused)" : "(new)");
         console.log("resolver: ", address(resolver));
+        console.log("");
+        console.log("Trust these values, not the broadcast summary's contract labels.");
         console.log("");
         console.log("Next, on the group's chain (Ethereum mainnet), as group manager:");
         console.log(
