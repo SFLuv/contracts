@@ -79,9 +79,10 @@ cast call $RES "resolve(address)(bool,bytes32)" <unbound eoa> --rpc-url $R
 # → false, 0x0…0   (nothing resolves until allowlisted *and* bound — expected)
 ```
 
-Identify contracts by their **getters, not by deploy-log labels** — `forge`'s
-broadcast summary transposed the registry and gate names on this deploy. The
-gate answers `owner()`; the registry answers `safeFor()`.
+Identify contracts by their **getters, not by a pasted deploy log** — `forge`'s
+printed summary transposed the registry and gate names on this deploy, though
+its `run-latest.json` was correct. The gate answers `owner()`; the registry
+answers `safeFor()`.
 
 ---
 
@@ -375,15 +376,17 @@ Found while implementing; none blocks deployment, all three are worth filing.
 | `SFLuvAuthGate` | Celo | `0x78B405B629e7c27F81d7dF3dCEcC097f58B47053` |
 | Gate owner / group manager | Celo + mainnet | `0x762F96819a7705448843E96D63D638Ec2f39403B` |
 
-Deployed 2026-08-30 at Celo block **76208199**. The resolver address is half of
+Deployed 2026-08-30 at Celo block **76208199**, from `0xcD44c7b9AeA6b90375a3888C02F70618d3387379` at nonces 0-2. The resolver address is half of
 every Signet key id and can never change without orphaning keys.
 
-> **The names in `forge script`'s broadcast summary were transposed** between
-> the registry and the gate. The table above is the on-chain truth, confirmed by
-> method probing: `0x78B4…7053` answers `owner()`/`allowAll()`/`delegate()` and
-> is the gate; `0xAa42…CD85` answers `safeFor()` and is the registry. The
-> resolver's own `REGISTRY()`/`GATE()` getters agree, so the deployment is
-> correctly wired — only the log labels were wrong. Trust the getters.
+> **`forge`'s printed terminal summary transposed the registry and gate names.**
+> Only that one block was wrong. The script, `broadcast/…/run-latest.json`, the
+> creation nonces and the deployed getters all agree with the table above:
+> nonce 0 → registry `0xAa42…CD85` (answers `safeFor()`), nonce 1 → gate
+> `0x78B4…7053` (answers `owner()`), nonce 2 → resolver. Because the broadcast
+> JSON is correct, everything that consumes it is correct too — including
+> `forge verify-contract`, so block-explorer verification labels them properly.
+> Identify these contracts by their getters, not by a pasted deploy log.
 
 Deployment state at hand-off — closed and inert, nothing resolves yet:
 
