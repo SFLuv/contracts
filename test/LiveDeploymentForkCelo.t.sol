@@ -33,6 +33,28 @@ contract LiveDeploymentForkCeloTest is Test {
     address constant SAFE = 0x3ADbca066E6B04F00DC9D110aF39875d892848Ff;
     address constant EOA = 0x4aB013e7537F9F419127c6C787ca0951158cF40b;
 
+    function _signBind(uint256 pk, address account, address safe, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash = keccak256(
+            abi.encode(REGISTRY.BIND_TYPEHASH(), account, safe, REGISTRY.nonces(account), deadline)
+        );
+        (, string memory name, string memory version, uint256 chainId, address verifying,,) = REGISTRY.eip712Domain();
+        bytes32 domain = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(name)),
+                keccak256(bytes(version)),
+                chainId,
+                verifying
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, keccak256(abi.encodePacked("\x19\x01", domain, structHash)));
+        return abi.encodePacked(r, s, v);
+    }
+
     function setUp() public {
         string memory url = vm.envOr("CELO_RPC_URL", string(""));
         vm.skip(bytes(url).length == 0);
@@ -80,26 +102,43 @@ contract LiveDeploymentForkCeloTest is Test {
         vm.assume(added);
 
         uint256 deadline = block.timestamp + 1 hours;
-        bytes32 structHash =
-            keccak256(abi.encode(REGISTRY.BIND_TYPEHASH(), signer, SAFE, REGISTRY.nonces(signer), deadline));
-        (, string memory name, string memory version, uint256 chainId, address verifying,,) = REGISTRY.eip712Domain();
-        bytes32 domain = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256(bytes(name)),
-                keccak256(bytes(version)),
-                chainId,
-                verifying
-            )
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, keccak256(abi.encodePacked("\x19\x01", domain, structHash)));
+        bytes memory sig = _signBind(pk, signer, SAFE, deadline);
 
         // Submitted by an unrelated relayer, who pays the gas.
         vm.prank(makeAddr("relayer"));
-        REGISTRY.bindWithSignature(signer, SAFE, deadline, abi.encodePacked(r, s, v));
+        REGISTRY.bindWithSignature(signer, SAFE, deadline, sig);
 
         assertEq(REGISTRY.safeFor(signer), SAFE);
         assertEq(REGISTRY.nonces(signer), 1);
+    }
+
+    /// The relayer's identity is not consulted, so the Safe itself may still
+    /// submit the binding through the CommunityModule — the sponsored rail the
+    /// wallet already uses. Only the Safe's *authority* was removed; its role
+    /// as a payer is unchanged, and `execSponsored` needs no modification.
+    function test_theSafeItselfMayStillRelay() public {
+        (address signer, uint256 pk) = makeAddrAndKey("another wallet owner");
+        vm.prank(SAFE);
+        (bool added,) = SAFE.call(abi.encodeWithSignature("addOwnerWithThreshold(address,uint256)", signer, uint256(1)));
+        vm.assume(added);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signBind(pk, signer, SAFE, deadline);
+
+        // The Safe is the caller. It carries no authority here; the signature does.
+        vm.prank(SAFE);
+        REGISTRY.bindWithSignature(signer, SAFE, deadline, sig);
+
+        assertEq(REGISTRY.safeFor(signer), SAFE);
+    }
+
+    /// ... and relaying does not let the Safe bind an owner who did not sign.
+    function test_theSafeCannotRelayWithoutASignature() public {
+        vm.prank(SAFE);
+        vm.expectRevert();
+        REGISTRY.bindWithSignature(EOA, SAFE, block.timestamp + 1 hours, hex"");
+
+        assertEq(REGISTRY.safeFor(EOA), address(0));
     }
 
     /// The vulnerability that retired the previous registry, checked against

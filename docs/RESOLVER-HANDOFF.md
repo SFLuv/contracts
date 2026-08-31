@@ -88,7 +88,7 @@ Both behaviours are now permanent regression tests in
 | | Retired | Replacement |
 |---|---|---|
 | Who may write a binding | the account **or the named Safe** | the account only — directly, or by EIP-712 signature it produced |
-| Gasless enrolment | Safe relays via CommunityModule | any relayer submits `bindWithSignature` |
+| Gasless enrolment | Safe relays via CommunityModule, and that call *is* the authority | same CommunityModule relay, but the account's signature is the authority — any relayer works |
 | Correcting a wrong binding | impossible, write-once | the account may rebind |
 | Replay protection | n/a | per-account nonce + deadline + EIP-712 domain |
 
@@ -439,11 +439,19 @@ stay addressable only there — treat it as a deliberate identity move, not a
 routine correction. It exists so that binding the wrong Safe is recoverable
 rather than permanent.
 
-> **Do not route this through the Safe.** An earlier version of the registry
-> also accepted `msg.sender == safe`, on the reasoning that a wallet vouching
-> for its own owner is self-authorising. It is not — the caller chooses which
-> contract plays the part of the Safe, and `isOwner` is then answered by that
-> same contract. See *The squatting vulnerability* under workstream A.
+> **The Safe may still relay this; only its authority was removed.**
+> `bindWithSignature` never reads `msg.sender` — the signature is the whole
+> authorisation — so the wallet can keep submitting the binding through the
+> CommunityModule, the sponsored rail it already uses. `execSponsored` needs no
+> change; only the calldata differs. **Do not build a separate relayer.**
+>
+> What went away is the Safe being *self-authorising*. An earlier version of the
+> registry accepted `msg.sender == safe` with no signature, on the reasoning
+> that a wallet vouching for its own owner speaks for it. It does not — the
+> caller chooses which contract plays the part of the Safe, and `isOwner` is
+> then answered by that same contract. See *The squatting vulnerability* under
+> workstream A. The new app work is producing the signature, not moving the
+> transaction.
 
 ### Every login
 
