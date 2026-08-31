@@ -23,7 +23,7 @@ address. Identity follows the wallet, not the login provider.
 
 | # | Work | Owner | Blocks |
 |---|---|---|---|
-| A | Deploy on Celo — first attempt **superseded**, see below; registry + resolver must be redeployed | SFLuv | D |
+| A | ~~Deploy on Celo~~ — **done** (redeployed after a vulnerability in the first registry) | SFLuv | D |
 | B | Node config on all six nodes | OLL (4 nodes) + SFLuv (2 nodes) | D |
 | C | Client support for the `onchain_resolver` scheme — **does not exist in the SDK today** | OLL (SDK) or SFLuv (app) | E |
 | D | Bind the resolver to the group (manager, timelocked) | SFLuv (group manager) | E |
@@ -34,12 +34,24 @@ moment the binding executes, any node without Celo RPC starts failing auth.
 
 ---
 
-## A. Deploy the contracts (SFLuv, Celo) — ⚠️ REDEPLOY REQUIRED
+## A. Deploy the contracts (SFLuv, Celo) — ✅ DONE 2026-08-30
 
-The first deployment (Celo block 76208199) shipped a registry with a
-**squatting vulnerability**. It was found before anything was bound, so the fix
-costs only gas — but the registry and resolver must be replaced before any
-account binds or step D executes.
+Live at Celo block **76237369**. The first deployment (block 76208199) shipped a
+registry with a **squatting vulnerability**; it was found before anything was
+bound, so the replacement cost only gas and orphaned no keys. The gate was not
+affected and was carried across untouched, allowlist included.
+
+| Contract | Address | |
+|---|---|---|
+| `SignetAuthResolver` | [`0x903409cB9248b1f0047c5F967a3db8E03Df3E11a`](https://celoscan.io/address/0x903409cB9248b1f0047c5F967a3db8E03Df3E11a#code) | new |
+| `SafeBindingRegistry` | [`0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa`](https://celoscan.io/address/0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa#code) | new |
+| `SFLuvAuthGate` | [`0x78B405B629e7c27F81d7dF3dCEcC097f58B47053`](https://celoscan.io/address/0x78B405B629e7c27F81d7dF3dCEcC097f58B47053#code) | unchanged |
+
+Verified on the live pair (`test/LiveDeploymentForkCelo.t.sol`, 9 tests): the
+resolver points at the new registry and the existing gate, the gate still holds
+its owner and staff allowlist, an unbound account is denied, binding resolves to
+the Safe, `bindWithSignature` works from an unrelated relayer, a lying Safe
+cannot squat an EOA, and a wrong binding can be corrected.
 
 ### The squatting vulnerability
 
@@ -85,7 +97,7 @@ address as an immutable, so a new registry means a new resolver.
 **`SFLuvAuthGate` is not affected and is reused as-is**, keeping its owner and
 the staff allowlist already written to it.
 
-### The redeploy
+### The deploy, as run
 
 ```bash
 EXPECTED_CHAIN_ID=42220 \
@@ -96,9 +108,11 @@ forge script script/DeploySignetResolver.s.sol:DeploySignetResolver \
 
 `GATE_ADDRESS` reuses the deployed gate rather than making a new one; the script
 asserts it has code, and asserts the resolver's `REGISTRY()`/`GATE()` match what
-was just deployed. Two transactions, roughly 0.3–0.9 CELO depending on gas.
+was just deployed. Two transactions, 0.34 CELO.
 
-Retired, do not use: registry `0xAa42790F…CD85`, resolver `0x0571e773…6ce3`.
+**Retired, do not use:** registry `0xAa42790F…CD85`, resolver `0x0571e773…6ce3`.
+They are still deployed and still verified on Celoscan; nothing was ever bound
+to them.
 
 **Remaining in this workstream: allowlist the staff.** `GATE_ALLOW_ALL=false` is
 the decision recorded in the spec — the trial is gated to staff — and until this
@@ -120,13 +134,18 @@ protocol constant:
 
 ```bash
 R=https://forno.celo.org
-RES=0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3
+RES=0x903409cB9248b1f0047c5F967a3db8E03Df3E11a
 cast call $RES "typeAndVersion()(string)" --rpc-url $R
 # → "SignetAuthResolver 1.0.0"   (exactly; anything else is rejected by every node)
-cast call $RES "REGISTRY()(address)"      --rpc-url $R   # → 0xAa42…CD85
-cast call $RES "GATE()(address)"          --rpc-url $R   # → 0x78B4…7053
+cast call $RES "REGISTRY()(address)"      --rpc-url $R   # → 0xd35A40…9BBa
+cast call $RES "GATE()(address)"          --rpc-url $R   # → 0x78B405…7053
 cast call $RES "resolve(address)(bool,bytes32)" <unbound eoa> --rpc-url $R
 # → false, 0x0…0   (nothing resolves until allowlisted *and* bound — expected)
+
+# The registry's EIP-712 domain, which the app must reproduce exactly
+cast call 0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa \
+  "eip712Domain()(bytes1,string,string,uint256,address,bytes32,uint256[])" --rpc-url $R
+# → "SFLuvSafeBindingRegistry", "1", 42220, 0xd35A40…9BBa
 ```
 
 Identify contracts by their **getters, not by a pasted deploy log** — `forge`'s
@@ -144,21 +163,17 @@ re-verification or for a redeploy elsewhere:
 export ETHERSCAN_API_KEY=<key>   # Etherscan V2: one key covers Celo
 
 # Registry first — no constructor args
-forge verify-contract 0xAa42790F463DDCBfDC808275589222A61CeCCD85 \
+forge verify-contract 0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa \
   src/signet/SafeBindingRegistry.sol:SafeBindingRegistry \
   --chain 42220 --watch
 
-# Gate — (owner, allowAll=false, allowlist=[])
-forge verify-contract 0x78B405B629e7c27F81d7dF3dCEcC097f58B47053 \
-  src/signet/SFLuvAuthGate.sol:SFLuvAuthGate \
-  --chain 42220 --watch \
-  --constructor-args 0x000000000000000000000000762f96819a7705448843e96d63d638ec2f39403b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000
-
-# Resolver last — (registry, gate), the order the constructor declares
-forge verify-contract 0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3 \
+# Resolver — (registry, gate), the order the constructor declares
+forge verify-contract 0x903409cB9248b1f0047c5F967a3db8E03Df3E11a \
   src/signet/SignetAuthResolver.sol:SignetAuthResolver \
   --chain 42220 --watch \
-  --constructor-args 0x000000000000000000000000aa42790f463ddcbfdc808275589222a61ceccd8500000000000000000000000078b405b629e7c27f81d7df3dcecc097f58b47053
+  --constructor-args 0x000000000000000000000000d35a40c49c6fafd8a3b193146726a7b3a97e9bba00000000000000000000000078b405b629e7c27f81d7df3dcecc097f58b47053
+
+# The gate was not redeployed; it is already verified.
 ```
 
 Order matters only for readability: verifying the resolver first would leave its
@@ -359,7 +374,7 @@ Group manager only, on the group's chain (**Ethereum mainnet**), group
 
 ```bash
 GROUP=0x86fe28144034fdaf86d3c964296dd33e4b94ac59
-RESOLVER=0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3
+RESOLVER=0x903409cB9248b1f0047c5F967a3db8E03Df3E11a
 cast send $GROUP "queueAuthResolver(uint64,address,bool)" 42220 $RESOLVER true --rpc-url $ETH_RPC …
 # wait removalDelay — 600 s on the live group
 cast send $GROUP "executeAuthResolver()" --rpc-url $ETH_RPC …
@@ -479,32 +494,33 @@ Found while implementing; none blocks deployment, all three are worth filing.
 | Signet group | Ethereum mainnet | `0x86fe28144034fdaf86d3c964296dd33e4b94ac59` |
 | Citizen Wallet account factory | Celo | `0x7cC54D54bBFc65d1f0af7ACee5e4042654AF8185` |
 | CommunityModule | Celo | `0x7079253c0358eF9Fd87E16488299Ef6e06F403B6` |
-| `SignetAuthResolver` | Celo | [`0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3`](https://celoscan.io/address/0x0571e773F921EF683c80a5bCFAEc7D06Edae6ce3#code) |
-| `SafeBindingRegistry` | Celo | [`0xAa42790F463DDCBfDC808275589222A61CeCCD85`](https://celoscan.io/address/0xAa42790F463DDCBfDC808275589222A61CeCCD85#code) |
+| `SignetAuthResolver` | Celo | [`0x903409cB9248b1f0047c5F967a3db8E03Df3E11a`](https://celoscan.io/address/0x903409cB9248b1f0047c5F967a3db8E03Df3E11a#code) |
+| `SafeBindingRegistry` | Celo | [`0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa`](https://celoscan.io/address/0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa#code) |
 | `SFLuvAuthGate` | Celo | [`0x78B405B629e7c27F81d7dF3dCEcC097f58B47053`](https://celoscan.io/address/0x78B405B629e7c27F81d7dF3dCEcC097f58B47053#code) |
 | Gate owner / group manager | Celo + mainnet | `0x762F96819a7705448843E96D63D638Ec2f39403B` |
 
-Deployed 2026-08-30 at Celo block **76208199**, from `0xcD44c7b9AeA6b90375a3888C02F70618d3387379` at nonces 0-2. The resolver address is half of
+Deployed 2026-08-30 at Celo block **76237369**, from `0xcD44c7b9AeA6b90375a3888C02F70618d3387379`. The resolver address is half of
 every Signet key id and can never change without orphaning keys.
 
-> **`forge`'s printed terminal summary transposed the registry and gate names.**
-> Only that one block was wrong. The script, `broadcast/…/run-latest.json`, the
-> creation nonces and the deployed getters all agree with the table above:
-> nonce 0 → registry `0xAa42…CD85` (answers `safeFor()`), nonce 1 → gate
-> `0x78B4…7053` (answers `owner()`), nonce 2 → resolver. Because the broadcast
-> JSON is correct, everything that consumes it is correct too — including
-> `forge verify-contract`, so block-explorer verification labels them properly.
-> Identify these contracts by their getters, not by a pasted deploy log.
+> **Identify these contracts by their getters, not by a pasted deploy log.** On
+> the first deploy, `forge`'s printed terminal summary transposed the registry
+> and gate names — only that one block was wrong, and `run-latest.json` was
+> correct throughout, so `forge verify-contract` still labelled them properly.
+> The gate answers `owner()`; the registry answers `safeFor()`; the resolver
+> answers `typeAndVersion()`.
 
 Deployment state at hand-off — closed and inert, nothing resolves yet:
 
 ```
 typeAndVersion()  "SignetAuthResolver 1.0.0"   exact accept-list match
-REGISTRY()        0xAa42790F463DDCBfDC808275589222A61CeCCD85
+REGISTRY()        0xd35A40c49c6FAfD8a3B193146726A7B3a97e9BBa
 GATE()            0x78B405B629e7c27F81d7dF3dCEcC097f58B47053
+registry domain   "SFLuvSafeBindingRegistry" / "1" / 42220 / 0xd35A40…9BBa
 gate owner()      0x762F96819a7705448843E96D63D638Ec2f39403B
 gate pendingOwner() / delegate()   0x0
 gate allowAll()   false
+gate allowlist    0x4aB013e7537F9F419127c6C787ca0951158cF40b  (test wallet owner)
+safeFor(anyone)   0x0   nothing bound yet
 resolve(anyone)   (false, 0x0)
 ```
 
