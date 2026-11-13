@@ -15,3 +15,13 @@ extra_output = ["storageLayout"]
 fs_permissions = [{ access = "read-write", path = "../../" }]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# SFLuvBatcher is built and deployed with this profile
+# (FOUNDRY_PROFILE=batcher), so its runtime code does not drift with Foundry's
+# defaults. The backend approves the batcher only if its code hash matches the
+# one this profile produces.
+[profile.batcher]
+solc = "0.8.28"
+evm_version = "cancun"
+optimizer = false
+out = "out-batcher"
