@@ -12,10 +12,10 @@ import {SFLuvBatcher} from "../src/SFLuvBatcher.sol";
  *         it once it is out.
  *
  *         Build and deploy it with FOUNDRY_PROFILE=batcher (solc 0.8.28, EVM
- *         cancun, optimizer off). The backend approves the batcher only if the
- *         deployed code's hash is the one that profile produces for the Celo
- *         token,
- *           0x744ebebb726abddb041df9e34f329a33d174d5d257b1a12ad0250b7518b855e0
+ *         cancun, optimizer off, remappings from remappings.txt only), from a
+ *         clean build. The backend approves the batcher only if the deployed
+ *         code's hash is the one that profile produces for the Celo token,
+ *           0x6bb04297721b59d7a65386999718f39edb4df5408d7b11a6bb0067d21c28fd51
  *         so any other build is refused and batching stays off.
  *
  *         After deploying:
@@ -30,6 +30,7 @@ import {SFLuvBatcher} from "../src/SFLuvBatcher.sol";
  *   SFLUV_TOKEN = 0x881cAd4f885c6701D8481c0eD347f6d35444eA7e (Celo mainnet, the default)
  *
  * Run (Celo mainnet):
+ *   FOUNDRY_PROFILE=batcher forge clean
  *   FOUNDRY_PROFILE=batcher forge script script/DeploySFLuvBatcher.s.sol:DeploySFLuvBatcher \
  *     --rpc-url https://forno.celo.org \
  *     --private-key $DEPLOYER_KEY --broadcast

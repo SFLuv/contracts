@@ -20,8 +20,14 @@ fs_permissions = [{ access = "read-write", path = "../../" }]
 # (FOUNDRY_PROFILE=batcher), so its runtime code does not drift with Foundry's
 # defaults. The backend approves the batcher only if its code hash matches the
 # one this profile produces.
+#
+# Remappings come from remappings.txt alone. Detected ones depend on whatever
+# else is checked out under lib/ (other branches' submodules), and they are
+# part of the compiler metadata, so they changed the code hash from one clone
+# to the next.
 [profile.batcher]
 solc = "0.8.28"
 evm_version = "cancun"
 optimizer = false
+auto_detect_remappings = false
 out = "out-batcher"
